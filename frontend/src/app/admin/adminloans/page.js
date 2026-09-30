@@ -383,4 +383,4 @@ const Field = ({ label, children }) => (
 
 const input = { width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px' };
 const th = { padding: '12px', textAlign: 'left', fontWeight: '600', color: '#334155' };
-const td = { padding: '12px' };s
+const td = { padding: '12px' };
