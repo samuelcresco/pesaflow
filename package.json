@@ -16,7 +16,6 @@
     "seed:fresh": "cd backend && npm run seed:fresh",
     "dev:fresh": "npm run seed && npm run dev",
     "setup": "npm run install:all && npm run seed"
-
   },
   "keywords": [
     "mern",
@@ -36,5 +35,12 @@
   "engines": {
     "node": "22.0.0",
     "npm": "8.0.0"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
   }
 }

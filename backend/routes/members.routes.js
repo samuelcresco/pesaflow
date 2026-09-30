@@ -1,0 +1,15 @@
+const express = require('express');
+const router = express.Router();
+const memberController = require('../controllers/memberController');
+
+router.get('/generate-password', memberController.generatePassword);
+router.post('/', memberController.createMember);
+router.get('/', memberController.getAllMembers);
+router.get('/:id', memberController.getMemberById);
+router.put('/:id', memberController.updateMember);
+router.delete('/:id', memberController.deleteMember);
+router.put('/:id/change-password', memberController.changePassword);
+router.get('/:id/statement', memberController.getMemberStatement);
+router.get('/:id/statement/pdf', memberController.downloadMemberStatementPDF);
+
+module.exports = router;

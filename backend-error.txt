@@ -1,0 +1,6 @@
+✅ Server running at http://localhost:5000
+✅ MongoDB Connected
+Seeding error: E11000 duplicate key error collection: pesaflow.accounts index: memberNumber_1 dup key: { memberNumber: null }
+❌ Bootstrap error: E11000 duplicate key error collection: pesaflow.accounts index: memberNumber_1 dup key: { memberNumber: null }
+[0mGET /api/members [36m304[0m 9.446 ms - -[0m
+^C

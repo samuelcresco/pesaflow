@@ -1,0 +1,40 @@
+============================================================
+BACKUP: MEMBER REGISTRATION CARD - WORKING
+Date: 22/09/2026
+============================================================
+
+# FRONTEND FILE: D:\PesaFlow\frontend\src\app\members\add\page.js
+
+[paste the content of members/add/page.js here - open it in notepad, Ctrl+A, Ctrl+C, paste]
+
+============================================================
+
+# FRONTEND FILE: D:\PesaFlow\frontend\src\app\members\page.js
+
+[paste the content of members/page.js here]
+
+============================================================
+
+# FRONTEND FILE: D:\PesaFlow\frontend\src\app\members\edit\[memberNumber]\page.js
+
+[paste the content of members/edit page here]
+
+============================================================
+
+# BACKEND FILE: D:\PesaFlow\backend\models\Member.js
+
+[paste the content here]
+
+============================================================
+
+# BACKEND FILE: D:\PesaFlow\backend\controllers\memberController.js
+
+[paste the content here]
+
+============================================================
+
+# BACKEND FILE: D:\PesaFlow\backend\routes\members.routes.js
+
+[paste the content here]
+
+============================================================

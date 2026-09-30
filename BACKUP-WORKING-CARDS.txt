@@ -1,0 +1,1779 @@
+===== MEMBER CARD ===== 
+ 
+--- add/page.js --- 
+'use client';
+
+import { useState } from 'react';
+import axios from 'axios';
+import { useRouter } from 'next/navigation';
+
+export default function AddMember() {
+  const router = useRouter();
+  const [formData, setFormData] = useState({
+    memberNumber: '',
+    fname: '',
+    lname: '',
+    email: '',
+    phoneNumber: '',
+    address: '',
+    occupation: '',
+    dateOfBirth: '',
+    idNumber: '',
+    photo: '',
+    ordinaryShares: 0,
+    ordinaryAmount: 0,
+    silverShares: 0,
+    silverAmount: 0,
+    goldenShares: 0,
+    goldenAmount: 0,
+    platinumShares: 0,
+    platinumAmount: 0,
+    nextOfKin: { fullName: '', relationship: '', contact: '', email: '', address: '' },
+    password: ''
+  });
+  const [photoPreview, setPhotoPreview] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    if (name.startsWith('nok_')) {
+      setFormData({ ...formData, nextOfKin: { ...formData.nextOfKin, [name.replace('nok_', '')]: value } });
+    } else {
+      setFormData({ ...formData, [name]: value });
+    }
+  };
+
+  const handlePhoto = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setPhotoPreview(reader.result);
+      setFormData({ ...formData, photo: reader.result });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const generatePassword = () => {
+    const letters = 'abcdefghijklmnopqrstuvwxyz';
+    let pwd = '';
+    for (let i = 0; i < 5; i++) pwd += letters.charAt(Math.floor(Math.random() * letters.length));
+    setFormData({ ...formData, password: pwd });
+  };
+
+  const copyPassword = () => {
+    if (!formData.password) return;
+    navigator.clipboard.writeText(formData.password);
+    alert('Password copied: ' + formData.password);
+  };
+
+  // ===== TOTALS =====
+  const totalShares = 
+    (parseInt(formData.ordinaryShares) || 0) +
+    (parseInt(formData.silverShares) || 0) +
+    (parseInt(formData.goldenShares) || 0) +
+    (parseInt(formData.platinumShares) || 0);
+
+  const totalValue = 
+    ((parseInt(formData.ordinaryShares) || 0) * (parseFloat(formData.ordinaryAmount) || 0)) +
+    ((parseInt(formData.silverShares) || 0) * (parseFloat(formData.silverAmount) || 0)) +
+    ((parseInt(formData.goldenShares) || 0) * (parseFloat(formData.goldenAmount) || 0)) +
+    ((parseInt(formData.platinumShares) || 0) * (parseFloat(formData.platinumAmount) || 0));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setMessage('');
+
+    // Validate total shares
+    if (totalShares > 15) {
+      setMessage('❌ Total shares cannot exceed 15');
+      setLoading(false);
+      return;
+    }
+
+    const payload = {
+      firstName: formData.fname,
+      surname: formData.lname,
+      occupation: formData.occupation,
+      contact: formData.phoneNumber,
+      email: formData.email,
+      address: formData.address,
+      memberNumber: formData.memberNumber,
+      dateOfBirth: formData.dateOfBirth,
+      photo: formData.photo,
+      shares: {
+        golden: parseInt(formData.goldenShares) || 0,
+        platinum: parseInt(formData.platinumShares) || 0,
+        silver: parseInt(formData.silverShares) || 0,
+        bronze: parseInt(formData.ordinaryShares) || 0
+      },
+      nextOfKin: {
+        fullName: formData.nextOfKin.fullName,
+        relationship: formData.nextOfKin.relationship,
+        contact: formData.nextOfKin.contact,
+        email: formData.nextOfKin.email,
+        address: formData.nextOfKin.address
+      }
+    };
+
+    try {
+      const res = await axios.post('http://localhost:5000/api/members', payload);
+      setMessage(`✅ Member created! Member No: ${formData.memberNumber} | Password: ${res.data.generatedPassword} — give this to the member.`);
+      setTimeout(() => router.push('/members'), 4000);
+    } catch (err) {
+      const errMsg = err.response?.data?.error || err.message || 'Failed to create member';
+      setMessage(`❌ ${errMsg}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ padding: '24px', maxWidth: '950px', margin: '0 auto', fontFamily: 'Segoe UI, sans-serif' }}>
+      <h1>Register New Member</h1>
+
+      {message && (
+        <div style={{
+          padding: '12px', borderRadius: '8px', marginBottom: '20px',
+          background: message.startsWith('✅') ? '#dcfce7' : '#fee2e2',
+          color: message.startsWith('✅') ? '#065f46' : '#991b1b'
+        }}>{message}</div>
+      )}
+
+      {/* PHOTO AT THE TOP */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '24px', padding: '16px', background: '#f8fafc', borderRadius: '12px' }}>
+        {photoPreview ? (
+          <img src={photoPreview} alt="Preview" style={{ width: '100px', height: '100px', borderRadius: '50%', objectFit: 'cover' }} />
+        ) : (
+          <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '36px' }}>👤</div>
+        )}
+        <div>
+          <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600' }}>Member Photo</label>
+          <input type="file" accept="image/*" onChange={handlePhoto} />
+        </div>
+      </div>
+
+      <form onSubmit={handleSubmit} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+        <Field label="Member Number *">
+          <input name="memberNumber" value={formData.memberNumber} onChange={handleChange} placeholder="e.g., CRS2005/001" required style={input} />
+        </Field>
+        <Field label="First Name *">
+          <input name="fname" value={formData.fname} onChange={handleChange} required style={input} />
+        </Field>
+        <Field label="Surname *">
+          <input name="lname" value={formData.lname} onChange={handleChange} required style={input} />
+        </Field>
+        <Field label="Email *">
+          <input name="email" type="email" value={formData.email} onChange={handleChange} required style={input} />
+        </Field>
+        <Field label="Phone Number *">
+          <input name="phoneNumber" value={formData.phoneNumber} onChange={handleChange} required style={input} />
+        </Field>
+        <Field label="Address *">
+          <input name="address" value={formData.address} onChange={handleChange} required style={input} />
+        </Field>
+        <Field label="Occupation">
+          <input name="occupation" value={formData.occupation} onChange={handleChange} style={input} />
+        </Field>
+        <Field label="Date of Birth *">
+          <input name="dateOfBirth" type="date" value={formData.dateOfBirth} onChange={handleChange} required style={input} />
+        </Field>
+        <Field label="ID Number">
+          <input name="idNumber" value={formData.idNumber} onChange={handleChange} style={input} />
+        </Field>
+
+        {/* SHARES */}
+        <div style={{ gridColumn: 'span 2', borderTop: '2px solid #eee', paddingTop: '16px' }}>
+          <h3>Shares</h3>
+          <p style={{ color: '#64748b', fontSize: '13px' }}>Enter number of shares and amount per share. Total shares cannot exceed 15.</p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+            <div>
+              <h4 style={{ marginBottom: '8px' }}>Ordinary Shares</h4>
+              <Field label="Number of Shares"><input name="ordinaryShares" type="number" value={formData.ordinaryShares} onChange={handleChange} min="0" style={input} /></Field>
+              <Field label="Amount per Share (UGX)"><input name="ordinaryAmount" type="number" value={formData.ordinaryAmount} onChange={handleChange} min="0" style={input} /></Field>
+              <div style={valueStyle}>Value: UGX {((parseInt(formData.ordinaryShares) || 0) * (parseFloat(formData.ordinaryAmount) || 0)).toLocaleString()}</div>
+            </div>
+            <div>
+              <h4 style={{ marginBottom: '8px' }}>Silver Shares</h4>
+              <Field label="Number of Shares"><input name="silverShares" type="number" value={formData.silverShares} onChange={handleChange} min="0" style={input} /></Field>
+              <Field label="Amount per Share (UGX)"><input name="silverAmount" type="number" value={formData.silverAmount} onChange={handleChange} min="0" style={input} /></Field>
+              <div style={valueStyle}>Value: UGX {((parseInt(formData.silverShares) || 0) * (parseFloat(formData.silverAmount) || 0)).toLocaleString()}</div>
+            </div>
+            <div>
+              <h4 style={{ marginBottom: '8px' }}>Golden Shares</h4>
+              <Field label="Number of Shares"><input name="goldenShares" type="number" value={formData.goldenShares} onChange={handleChange} min="0" style={input} /></Field>
+              <Field label="Amount per Share (UGX)"><input name="goldenAmount" type="number" value={formData.goldenAmount} onChange={handleChange} min="0" style={input} /></Field>
+              <div style={valueStyle}>Value: UGX {((parseInt(formData.goldenShares) || 0) * (parseFloat(formData.goldenAmount) || 0)).toLocaleString()}</div>
+            </div>
+            <div>
+              <h4 style={{ marginBottom: '8px' }}>Platinum Shares</h4>
+              <Field label="Number of Shares"><input name="platinumShares" type="number" value={formData.platinumShares} onChange={handleChange} min="0" style={input} /></Field>
+              <Field label="Amount per Share (UGX)"><input name="platinumAmount" type="number" value={formData.platinumAmount} onChange={handleChange} min="0" style={input} /></Field>
+              <div style={valueStyle}>Value: UGX {((parseInt(formData.platinumShares) || 0) * (parseFloat(formData.platinumAmount) || 0)).toLocaleString()}</div>
+            </div>
+          </div>
+
+          {/* TOTALS */}
+          <div style={{
+            marginTop: '16px',
+            padding: '14px 20px',
+            background: totalShares > 15 ? '#fee2e2' : '#eff6ff',
+            borderRadius: '10px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '12px',
+            fontWeight: '600',
+            color: totalShares > 15 ? '#991b1b' : '#1e40af'
+          }}>
+            <span>Total Shares: {totalShares} / 15 {totalShares > 15 && ' — Exceeds!'}</span>
+            <span>Total Value: UGX {totalValue.toLocaleString()}</span>
+          </div>
+        </div>
+
+        {/* NEXT OF KIN */}
+        <div style={{ gridColumn: 'span 2', borderTop: '2px solid #eee', paddingTop: '16px' }}>
+          <h3>Next of Kin</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <Field label="Full Name *"><input name="nok_fullName" value={formData.nextOfKin.fullName} onChange={handleChange} required style={input} /></Field>
+            <Field label="Relationship *"><input name="nok_relationship" value={formData.nextOfKin.relationship} onChange={handleChange} required style={input} /></Field>
+            <Field label="Contact *"><input name="nok_contact" value={formData.nextOfKin.contact} onChange={handleChange} required style={input} /></Field>
+            <Field label="Email"><input name="nok_email" type="email" value={formData.nextOfKin.email} onChange={handleChange} style={input} /></Field>
+            <div style={{ gridColumn: 'span 2' }}>
+              <Field label="Address *"><input name="nok_address" value={formData.nextOfKin.address} onChange={handleChange} required style={input} /></Field>
+            </div>
+          </div>
+        </div>
+
+        {/* PASSWORD */}
+      <div style={{ gridColumn: 'span 2', borderTop: '2px solid #eee', paddingTop: '16px' }}>
+  <h3>Password</h3>
+  <p style={{ color: '#64748b', fontSize: '13px' }}>A password will be auto-generated. Member can change it after first login.</p>
+  <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+    <button type="button" onClick={generatePassword} style={btnSecondary}>Generate Password</button>
+    {formData.password && (
+      <>
+        <span style={{
+          padding: '10px 20px',
+          background: '#dcfce7',
+          color: '#065f46',
+          borderRadius: '8px',
+          fontWeight: '700',
+          fontSize: '20px',
+          letterSpacing: '4px',
+          fontFamily: 'monospace'
+        }}>
+          {formData.password}
+        </span>
+        <button
+          type="button"
+          onClick={() => {
+            navigator.clipboard.writeText(formData.password);
+            alert('Password copied: ' + formData.password);
+          }}
+          style={{
+            padding: '10px 16px',
+            background: '#2563eb',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontWeight: '600'
+          }}
+        >
+          📋 Copy
+        </button>
+      </>
+    )}
+  </div>
+  {formData.password && (
+    <p style={{ color: '#15803d', fontSize: '13px', marginTop: '8px' }}>
+      ✅ Give this password to the member. They will use it to log in and can change it later.
+    </p>
+  )}
+</div>
+
+
+        {/* SUBMIT */}
+        <div style={{ gridColumn: 'span 2', display: 'flex', gap: '12px', marginTop: '16px' }}>
+          <button type="submit" disabled={loading || totalShares > 15} style={{
+            ...btnPrimary,
+            opacity: (loading || totalShares > 15) ? 0.5 : 1
+          }}>
+            {loading ? 'Creating...' : 'Create Member'}
+          </button>
+          <button type="button" onClick={() => router.push('/members')} style={btnSecondary}>Cancel</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+const Field = ({ label, children }) => (
+  <div style={{ marginBottom: '10px' }}>
+    <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500', color: '#334155', fontSize: '14px' }}>{label}</label>
+    {children}
+  </div>
+);
+const input = { width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px' };
+const valueStyle = { marginTop: '6px', padding: '8px 12px', background: '#f1f5f9', borderRadius: '6px', fontSize: '13px', color: '#475569', fontWeight: '600' };
+const btnPrimary = { padding: '12px 24px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', fontSize: '15px' };
+const btnSecondary = { padding: '10px 20px', background: '#e5e7eb', color: '#1f2937', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', fontSize: '14px' }; 
+--- members/page.js --- 
+'use client';
+
+import { useEffect, useState } from 'react';
+import axios from 'axios';
+
+export default function Members() {
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    fetchMembers();
+  }, []);
+
+  const fetchMembers = async () => {
+    try {
+      const res = await axios.get('http://localhost:5000/api/members');
+      setMembers(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      setError('Failed to load members.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm('Are you sure you want to delete this member?')) return;
+    try {
+      await axios.delete(`http://localhost:5000/api/members/${id}`);
+      fetchMembers();
+    } catch (err) {
+      alert('Failed to delete member');
+    }
+  };
+
+  if (loading) return <div style={{ padding: '40px' }}>Loading members...</div>;
+  if (error) return <div style={{ padding: '40px', color: 'red' }}>{error}</div>;
+
+  return (
+    <div style={{ padding: '24px', maxWidth: '1300px', margin: '0 auto', fontFamily: 'Segoe UI, sans-serif' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <h1>👥 Members</h1>
+        <a href="/members/add" style={{
+          padding: '10px 20px',
+          background: '#2563eb',
+          color: '#fff',
+          borderRadius: '8px',
+          textDecoration: 'none',
+          fontWeight: '600'
+        }}>+ Add Member</a>
+      </div>
+
+      {members.length === 0 ? (
+        <p style={{ color: '#6b7280' }}>No members yet.</p>
+      ) : (
+        <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid #e5e7eb' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+            <thead>
+              <tr style={{ background: '#0f3460', color: '#fff' }}>
+                <th style={{ padding: '12px', textAlign: 'left' }}>Member Number</th>
+                <th style={{ padding: '12px', textAlign: 'left' }}>Name</th>
+                <th style={{ padding: '12px', textAlign: 'left' }}>Email</th>
+                <th style={{ padding: '12px', textAlign: 'left' }}>Phone</th>
+                <th style={{ padding: '12px', textAlign: 'left' }}>Status</th>
+                <th style={{ padding: '12px', textAlign: 'left' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {members.map((member, i) => (
+                <tr key={member._id} style={{ borderBottom: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#fafbfc' }}>
+                  <td style={{ padding: '12px' }}>{member.memberNumber}</td>
+                  <td style={{ padding: '12px' }}>{member.firstName} {member.surname}</td>
+                  <td style={{ padding: '12px' }}>{member.email}</td>
+                  <td style={{ padding: '12px' }}>{member.contact}</td>
+                  <td style={{ padding: '12px' }}>
+                    <span style={{
+                      padding: '4px 12px',
+                      borderRadius: '20px',
+                      fontSize: '12px',
+                      fontWeight: '600',
+                      background: member.active !== false ? '#d1fae5' : '#fee2e2',
+                      color: member.active !== false ? '#065f46' : '#991b1b'
+                    }}>
+                      {member.active !== false ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td style={{ padding: '12px' }}>
+                    <a
+                      href={`/members/edit/${member._id}`}
+                      style={{
+                        padding: '5px 12px',
+                        background: '#0f3460',
+                        color: '#fff',
+                        borderRadius: '4px',
+                        textDecoration: 'none',
+                        fontSize: '12px',
+                        marginRight: '5px',
+                        display: 'inline-block'
+                      }}
+                    >Edit</a>
+                    <button
+                      onClick={() => handleDelete(member._id)}
+                      style={{
+                        padding: '5px 12px',
+                        background: '#dc3545',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '12px'
+                      }}
+                    >Delete</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div style={{ marginTop: '24px' }}>
+        <a href="/dashboard" style={{ color: '#2563eb', textDecoration: 'none' }}>← Back to Dashboard</a>
+      </div>
+    </div>
+  );
+} 
+--- Member.js model --- 
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+
+const MemberSchema = new mongoose.Schema({
+  firstName: { type: String, required: true },
+  surname: { type: String, required: true },
+  occupation: { type: String },
+  contact: { type: String, required: true },
+  email: { type: String, default: '' },
+  address: { type: String, required: true },
+  photo: { type: String, default: '' },
+  memberNumber: { type: String, required: true, unique: true },
+  dateOfBirth: { type: Date, required: true },
+  dateOfSubscription: { type: Date, default: Date.now },
+  password: { type: String, required: true },
+
+  shares: {
+    golden: { type: Number, default: 0 },
+    platinum: { type: Number, default: 0 },
+    silver: { type: Number, default: 0 },
+    bronze: { type: Number, default: 0 }
+  },
+
+  // NEW: Savings & Lock system
+  savings: { type: Number, default: 0 },
+  lockedSavings: { type: Number, default: 0 },
+  activeLoanId: { type: mongoose.Schema.Types.ObjectId, ref: 'Loan', default: null },
+
+  nextOfKin: {
+    fullName: { type: String, required: true },
+    relationship: { type: String, required: true },
+    contact: { type: String, required: true },
+    email: { type: String },
+    address: { type: String, required: true },
+    photo: { type: String, default: '' }
+  },
+
+  active: { type: Boolean, default: true }
+}, { timestamps: true });
+
+MemberSchema.pre('save', async function(next) {
+  if (!this.isModified('password')) return next();
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+  next();
+});
+
+MemberSchema.methods.comparePassword = async function(enteredPassword) {
+  return await bcrypt.compare(enteredPassword, this.password);
+};
+
+MemberSchema.virtual('totalShares').get(function() {
+  return this.shares.golden + this.shares.platinum + this.shares.silver + this.shares.bronze;
+});
+
+MemberSchema.virtual('availableSavings').get(function() {
+  return this.savings - this.lockedSavings;
+});
+
+MemberSchema.pre('save', function(next) {
+  const total = this.shares.golden + this.shares.platinum + this.shares.silver + this.shares.bronze;
+  if (total > 15) throw new Error('Total shares cannot exceed 15');
+  next();
+});
+
+module.exports = mongoose.model('Member', MemberSchema); 
+--- memberController.js --- 
+const Member = require('../models/Member');
+const bcrypt = require('bcryptjs');
+
+// ==================== GENERATE 5-LETTER PASSWORD ====================
+const generatePassword = () => {
+  const letters = 'abcdefghijklmnopqrstuvwxyz';
+  let password = '';
+  for (let i = 0; i < 5; i++) {
+    password += letters.charAt(Math.floor(Math.random() * letters.length));
+  }
+  return password;
+};
+
+// ==================== CREATE MEMBER ====================
+exports.createMember = async (req, res) => {
+  try {
+    const {
+      firstName, surname, occupation, contact, email, address,
+      memberNumber, dateOfBirth, shares, nextOfKin, photo
+    } = req.body;
+
+    // Check duplicates
+    const existingMember = await Member.findOne({
+      $or: [{ email }, { memberNumber }]
+    });
+    if (existingMember) {
+      return res.status(400).json({
+        error: 'Member with this email or member number already exists'
+      });
+    }
+
+    // Generate 5-letter password
+    const plainPassword = generatePassword();
+
+    // Create member
+    const member = new Member({
+      firstName,
+      surname,
+      occupation: occupation || '',
+      contact,
+      email,
+      address,
+      photo: photo || '',
+      memberNumber,
+      dateOfBirth,
+      password: plainPassword,
+      shares: {
+        golden: shares?.golden || 0,
+        platinum: shares?.platinum || 0,
+        silver: shares?.silver || 0,
+        bronze: shares?.bronze || 0
+      },
+      nextOfKin: {
+        fullName: nextOfKin?.fullName,
+        relationship: nextOfKin?.relationship,
+        contact: nextOfKin?.contact,
+        email: nextOfKin?.email || '',
+        address: nextOfKin?.address
+      }
+    });
+
+    await member.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Member created successfully',
+      member: {
+        _id: member._id,
+        firstName: member.firstName,
+        surname: member.surname,
+        memberNumber: member.memberNumber,
+        email: member.email
+      },
+      generatedPassword: plainPassword
+    });
+
+  } catch (error) {
+    console.error('CREATE MEMBER ERROR:', error.message);
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// ==================== GET ALL ====================
+exports.getAllMembers = async (req, res) => {
+  try {
+    const members = await Member.find().sort({ createdAt: -1 });
+    res.json(members);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== GET BY ID ====================
+exports.getMemberById = async (req, res) => {
+  try {
+    const member = await Member.findById(req.params.id);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+    res.json(member);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== UPDATE ====================
+exports.updateMember = async (req, res) => {
+  try {
+    const member = await Member.findById(req.params.id);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+
+    const fields = ['firstName', 'surname', 'occupation', 'contact', 'email', 'address', 'dateOfBirth', 'active', 'photo'];
+    fields.forEach(f => {
+      if (req.body[f] !== undefined) member[f] = req.body[f];
+    });
+
+    if (req.body.shares) {
+      member.shares = { ...member.shares.toObject(), ...req.body.shares };
+    }
+
+    if (req.body.nextOfKin) {
+      member.nextOfKin = { ...member.nextOfKin.toObject(), ...req.body.nextOfKin };
+    }
+
+    await member.save();
+    res.json({ success: true, member });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// ==================== DELETE ====================
+exports.deleteMember = async (req, res) => {
+  try {
+    const member = await Member.findByIdAndDelete(req.params.id);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+    res.json({ success: true, message: 'Member deleted' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== GENERATE PASSWORD ====================
+exports.generatePassword = async (req, res) => {
+  res.json({ password: generatePassword() });
+};
+
+// ==================== CHANGE PASSWORD ====================
+exports.changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const member = await Member.findById(req.params.id);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+
+    const isMatch = await member.comparePassword(currentPassword);
+    if (!isMatch) return res.status(400).json({ error: 'Current password is incorrect' });
+
+    member.password = newPassword;
+    await member.save();
+    res.json({ success: true, message: 'Password changed' });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+}; 
+--- members.routes.js --- 
+const express = require('express');
+const router = express.Router();
+const memberController = require('../controllers/memberController');
+
+router.get('/generate-password', memberController.generatePassword);
+router.post('/', memberController.createMember);
+router.get('/', memberController.getAllMembers);
+router.get('/:id', memberController.getMemberById);
+router.put('/:id', memberController.updateMember);
+router.delete('/:id', memberController.deleteMember);
+router.put('/:id/change-password', memberController.changePassword);
+
+module.exports = router;
+ 
+===== SAVINGS CARD ===== 
+ 
+--- savings/page.js --- 
+'use client';
+
+import { useEffect, useState } from 'react';
+
+const DESCRIPTION_OPTIONS = [
+  'Monthly Contribution',
+  'Late Payment',
+  'Personal Savings',
+  'Share Purchase',
+  'External Donation',
+  'Member Donation',
+  'Late Coming',
+  'Misconduct',
+  'Miscellaneous',
+  'Facilitation'
+];
+
+export default function SavingsPage() {
+  const [summary, setSummary] = useState({ generalSavings: 0, memberSavings: 0, clubCapital: 0 });
+  const [memberSavings, setMemberSavings] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [agreedSavings, setAgreedSavings] = useState([]);
+  const [membershipFees, setMembershipFees] = useState({ firstTime: 0, renewal: 0 });
+  const [sharePrices, setSharePrices] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(null);
+  const [form, setForm] = useState({
+    memberId: '',
+    amount: '',
+    description: 'Monthly Contribution',
+    shareType: 'golden',
+    shareQuantity: 1,
+    date: new Date().toISOString().split('T')[0],
+    donationType: 'member',
+    donorName: '',
+    membershipType: 'first_time'
+  });
+  const [setup, setSetup] = useState({ year: new Date().getFullYear(), amount: '', firstTime: 0, renewal: 0 });
+
+  useEffect(() => { fetchAll(); }, []);
+
+  const fetchAll = async () => {
+    try {
+      const [s, m, mem, a, fees, shareSettings] = await Promise.all([
+        fetch('http://localhost:5000/api/savings/summary').then(r => r.json()),
+        fetch('http://localhost:5000/api/savings/members').then(r => r.json()),
+        fetch('http://localhost:5000/api/members').then(r => r.json()),
+        fetch('http://localhost:5000/api/savings/agreed-savings').then(r => r.json()).catch(() => []),
+        fetch('http://localhost:5000/api/savings/membership-fees').then(r => r.json()).catch(() => ({ firstTime: 0, renewal: 0 })),
+        fetch('http://localhost:5000/api/settings/shares').then(r => r.json()).catch(() => ({}))
+      ]);
+      setSummary(s);
+      setMemberSavings(Array.isArray(m) ? m : []);
+      setMembers(Array.isArray(mem) ? mem : []);
+      setAgreedSavings(Array.isArray(a) ? a : []);
+      setMembershipFees(fees || { firstTime: 0, renewal: 0 });
+      setSetup(prev => ({ ...prev, firstTime: fees?.firstTime || 0, renewal: fees?.renewal || 0 }));
+      if (shareSettings.shareTypes) setSharePrices(shareSettings.shareTypes);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const addSaving = async (e) => {
+    e.preventDefault();
+    const payload = { ...form, category: modal };
+
+    if (modal === 'business_profit') delete payload.memberId;
+    if (modal === 'donation' && form.donationType === 'external') delete payload.memberId;
+
+    if (modal === 'membership') {
+      const year = new Date(form.date).getFullYear();
+      const yearSetting = agreedSavings.find(a => a.year === year);
+      payload.amount = form.amount || (form.membershipType === 'renewal'
+        ? (yearSetting?.membershipRenewalFee || 0)
+        : (yearSetting?.membershipFee || 0));
+    }
+
+    try {
+      const res = await fetch('http://localhost:5000/api/savings/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        alert('✅ Saved!');
+        setModal(null);
+        setForm({
+          memberId: '', amount: '', description: 'Monthly Contribution',
+          shareType: 'golden', shareQuantity: 1,
+          date: new Date().toISOString().split('T')[0],
+          donationType: 'member', donorName: '', membershipType: 'first_time'
+        });
+        fetchAll();
+      } else {
+        const d = await res.json();
+        alert('❌ ' + (d.error || 'Failed'));
+      }
+    } catch (err) {
+      alert('❌ Network error');
+    }
+  };
+
+  const saveSetup = async (type) => {
+    try {
+      let url, body;
+      if (type === 'agreed-monthly') {
+        url = 'http://localhost:5000/api/savings/settings/agreed-monthly';
+        body = { year: setup.year, amount: parseFloat(setup.amount) };
+      } else if (type === 'membership-fees') {
+        url = 'http://localhost:5000/api/savings/settings/membership-fees';
+        body = {
+          year: setup.year,
+          firstTime: parseFloat(setup.firstTime),
+          renewal: parseFloat(setup.renewal)
+        };
+      }
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (res.ok) {
+        alert('✅ Saved!');
+        fetchAll();
+      }
+    } catch (err) { alert('Error'); }
+  };
+
+  const openPDF = (url) => window.open(`http://localhost:5000/api/savings/${url}`, '_blank');
+
+  const handleDateChange = (value) => {
+    const updates = { date: value };
+    const year = new Date(value).getFullYear();
+    const yearSetting = agreedSavings.find(a => a.year === year);
+
+    if (modal === 'monthly' && yearSetting) {
+      updates.amount = yearSetting.amount;
+    }
+
+    if (modal === 'membership' && yearSetting) {
+      updates.amount = form.membershipType === 'renewal'
+        ? (yearSetting.membershipRenewalFee || 0)
+        : (yearSetting.membershipFee || 0);
+    }
+
+    setForm(prev => ({ ...prev, ...updates }));
+  };
+
+  const handleMembershipType = (value) => {
+    const year = new Date(form.date).getFullYear();
+    const yearSetting = agreedSavings.find(a => a.year === year);
+    const amount = value === 'renewal'
+      ? (yearSetting?.membershipRenewalFee || 0)
+      : (yearSetting?.membershipFee || 0);
+    setForm(prev => ({ ...prev, membershipType: value, amount: amount || '' }));
+  };
+
+  const handleShareChange = (shareType, quantity) => {
+    const price = sharePrices[shareType]?.price || 0;
+    const amount = price * quantity;
+    setForm(prev => ({ ...prev, shareType, shareQuantity: quantity, amount: amount || '' }));
+  };
+
+  if (loading) return <div style={{ padding: '40px' }}>Loading...</div>;
+
+  const currentYear = new Date(form.date).getFullYear();
+  const currentYearSetting = agreedSavings.find(a => a.year === currentYear);
+
+  return (
+    <div style={{ padding: '24px', maxWidth: '1300px', margin: '0 auto', fontFamily: 'Segoe UI, sans-serif' }}>
+      <h1 style={{ color: '#1e293b' }}>💰 Savings & Income</h1>
+
+      {/* Action Buttons */}
+      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '24px' }}>
+        <Btn onClick={() => setModal('monthly')} color="#2563eb">➕ Add Monthly Savings</Btn>
+        <Btn onClick={() => setModal('extra')} color="#22c55e">➕ Add Extra Savings</Btn>
+        <Btn onClick={() => setModal('penalty')} color="#ef4444">➕ Add Penalty</Btn>
+        <Btn onClick={() => setModal('shares')} color="#8b5cf6">🛒 Buy Shares</Btn>
+        <Btn onClick={() => setModal('membership')} color="#0891b2">🆔 Add Membership</Btn>
+        <Btn onClick={() => setModal('donation')} color="#f59e0b">➕ Add Donation</Btn>
+        <Btn onClick={() => setModal('misc')} color="#eab308">➕ Add Miscellaneous</Btn>
+        <Btn onClick={() => setModal('settings')} color="#6b7280">⚙️ Savings Settings</Btn>
+      </div>
+
+      {/* PDF Reports + Links */}
+      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '24px' }}>
+        <Btn onClick={() => openPDF('club-capital-report')} color="#1e40af">📄 Club Capital Report</Btn>
+        <Btn onClick={() => openPDF('general-report')} color="#7c3aed">📊 General Report</Btn>
+        <a href="/all-transactions" style={{ padding: '10px 18px', background: '#0891b2', color: '#fff', borderRadius: '8px', textDecoration: 'none', fontSize: '14px', fontWeight: '600' }}>📋 All Transactions</a>
+        <a href="/external-donations" style={{ padding: '10px 18px', background: '#f59e0b', color: '#fff', borderRadius: '8px', textDecoration: 'none', fontSize: '14px', fontWeight: '600' }}>💝 External Donations</a>
+      </div>
+
+      {/* Summary Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '28px' }}>
+        <Card title="General Savings" value={summary.generalSavings || 0} color="#0369a1" bg="#e0f2fe" icon="🏦" />
+        <Card title="Total Member Savings" value={summary.memberSavings || 0} color="#15803d" bg="#dcfce7" icon="👥" />
+        <Card title="Total Club Capital" value={summary.clubCapital || 0} color="#b45309" bg="#fef9e7" icon="🏛️" />
+      </div>
+
+      {/* Member Savings Table */}
+      <h2 style={{ color: '#1e293b' }}>Member Savings</h2>
+      <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid #e5e7eb', marginTop: '12px' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+          <thead>
+            <tr style={{ background: '#0f3460', color: '#fff' }}>
+              {['Member','Member No.','Monthly','Extra','Miscellaneous','Donation','Penalties','Membership','Shares Value','Actions'].map(h => (
+                <th key={h} style={{ padding: '12px', textAlign: 'left', fontWeight: '600' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {memberSavings.length === 0 ? (
+              <tr><td colSpan="10" style={{ padding: '20px', textAlign: 'center', color: '#6b7280' }}>No savings yet.</td></tr>
+            ) : memberSavings.map((m, i) => (
+              <tr key={m._id} style={{ borderBottom: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#fafbfc' }}>
+                <td style={td}>{m.name}</td>
+                <td style={td}>{m.memberNumber}</td>
+                <td style={td}>UGX {(m.monthlySavings || 0).toLocaleString()}</td>
+                <td style={td}>UGX {(m.extraSavings || 0).toLocaleString()}</td>
+                <td style={td}>UGX {(m.misc || 0).toLocaleString()}</td>
+                <td style={td}>UGX {(m.donation || 0).toLocaleString()}</td>
+                <td style={td}>UGX {(m.penalties || 0).toLocaleString()}</td>
+                <td style={td}>UGX {(m.membership || 0).toLocaleString()}</td>
+                <td style={td}>UGX {(m.sharesValue || 0).toLocaleString()}</td>
+                <td style={td}>
+                  <a href={`/all-transactions?member=${m._id}`} style={{ padding: '5px 12px', background: '#3b82f6', color: '#fff', borderRadius: '6px', textDecoration: 'none', fontSize: '12px', marginRight: '4px' }}>View</a>
+                  <button onClick={() => openPDF(`member-statement/${m._id}`)} style={{ padding: '5px 12px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}>PDF</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Add Saving Modal */}
+      {modal && modal !== 'settings' && (
+        <Modal onClose={() => setModal(null)} title={`Add ${labelFor(modal)}`}>
+          <form onSubmit={addSaving}>
+
+            {modal === 'donation' && (
+              <Field label="Donation Type">
+                <select value={form.donationType} onChange={e => setForm({ ...form, donationType: e.target.value })} style={input}>
+                  <option value="member">Member Donation</option>
+                  <option value="external">External Donation</option>
+                </select>
+              </Field>
+            )}
+
+            {['monthly','extra','penalty','membership','shares','misc'].includes(modal) && (
+              <Field label="Member">
+                <select value={form.memberId} onChange={e => setForm({ ...form, memberId: e.target.value })} required style={input}>
+                  <option value="">Select Member</option>
+                  {members.map(m => (
+                    <option key={m._id} value={m._id}>{m.firstName} {m.surname} ({m.memberNumber})</option>
+                  ))}
+                </select>
+              </Field>
+            )}
+
+            {modal === 'donation' && form.donationType === 'member' && (
+              <Field label="Member">
+                <select value={form.memberId} onChange={e => setForm({ ...form, memberId: e.target.value })} required style={input}>
+                  <option value="">Select Member</option>
+                  {members.map(m => (
+                    <option key={m._id} value={m._id}>{m.firstName} {m.surname} ({m.memberNumber})</option>
+                  ))}
+                </select>
+              </Field>
+            )}
+
+            {modal === 'donation' && form.donationType === 'external' && (
+              <Field label="Donor Name">
+                <input type="text" value={form.donorName} onChange={e => setForm({ ...form, donorName: e.target.value })} required style={input} placeholder="e.g., Jane Doe" />
+              </Field>
+            )}
+
+            {modal === 'membership' && (
+              <Field label="Payment Type">
+                <select value={form.membershipType} onChange={e => handleMembershipType(e.target.value)} style={input}>
+                  <option value="first_time">
+                    First-time Membership (UGX {(currentYearSetting?.membershipFee || 0).toLocaleString()})
+                  </option>
+                  <option value="renewal">
+                    Annual Renewal (UGX {(currentYearSetting?.membershipRenewalFee || 0).toLocaleString()})
+                  </option>
+                </select>
+              </Field>
+            )}
+
+            {modal === 'shares' && (
+              <>
+                <Field label="Share Type">
+                  <select value={form.shareType} onChange={e => handleShareChange(e.target.value, form.shareQuantity)} style={input}>
+                    <option value="golden">Golden</option>
+                    <option value="platinum">Platinum</option>
+                    <option value="silver">Silver</option>
+                    <option value="bronze">Bronze</option>
+                  </select>
+                </Field>
+                <Field label="Quantity">
+                  <input type="number" min="1" value={form.shareQuantity} onChange={e => handleShareChange(form.shareType, parseInt(e.target.value) || 0)} style={input} />
+                </Field>
+              </>
+            )}
+
+            <Field label="Date">
+              <input type="date" value={form.date} onChange={e => handleDateChange(e.target.value)} min="2015-01-01" required style={input} />
+            </Field>
+
+            <Field label="Amount (UGX)">
+              <input type="number" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required style={input} />
+              {modal === 'monthly' && agreedSavings.length > 0 && (
+                <small style={{ color: '#64748b' }}>Auto-filled from agreed savings for the year. Editable.</small>
+              )}
+              {modal === 'shares' && sharePrices[form.shareType] && (
+                <small style={{ color: '#64748b' }}>
+                  Auto-calculated: {form.shareQuantity} × UGX {(sharePrices[form.shareType].price || 0).toLocaleString()}
+                </small>
+              )}
+              {modal === 'membership' && (
+                <small style={{ color: '#64748b' }}>Auto-filled from year's fee. Editable.</small>
+              )}
+            </Field>
+
+            <Field label="Description">
+              <select value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} style={input}>
+                {DESCRIPTION_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+              </select>
+            </Field>
+
+            <Btn type="submit" color="#2563eb">Save</Btn>
+          </form>
+        </Modal>
+      )}
+
+      {/* Settings Modal */}
+      {modal === 'settings' && (
+        <Modal onClose={() => setModal(null)} title="⚙️ Savings Settings">
+          <h3 style={{ marginTop: 0 }}>Agreed Monthly Savings</h3>
+          <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+            <input type="number" placeholder="Year" value={setup.year} onChange={e => setSetup({ ...setup, year: parseInt(e.target.value) })} style={input} />
+            <input type="number" placeholder="Amount" value={setup.amount} onChange={e => setSetup({ ...setup, amount: e.target.value })} style={input} />
+            <button type="button" onClick={() => saveSetup('agreed-monthly')} style={btnMini('#22c55e')}>Save</button>
+          </div>
+
+          {agreedSavings.length > 0 && (
+            <table style={{ width: '100%', fontSize: '13px', borderCollapse: 'collapse', marginBottom: '20px' }}>
+              <tbody>
+                {agreedSavings.map(a => (
+                  <tr key={a._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '6px' }}>{a.year}</td>
+                    <td style={{ padding: '6px' }}>UGX {(a.amount || 0).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          <h3>Membership Fees</h3>
+          <Field label="Year for Fees">
+            <input type="number" value={setup.year} onChange={e => setSetup({ ...setup, year: parseInt(e.target.value) })} style={input} />
+          </Field>
+          <Field label="First-time Membership Fee (UGX)">
+            <input type="number" value={setup.firstTime} onChange={e => setSetup({ ...setup, firstTime: e.target.value })} style={input} />
+          </Field>
+          <Field label="Annual Renewal Fee (UGX)">
+            <input type="number" value={setup.renewal} onChange={e => setSetup({ ...setup, renewal: e.target.value })} style={input} />
+          </Field>
+          <button type="button" onClick={() => saveSetup('membership-fees')} style={btnMini('#22c55e')}>Save Membership Fees</button>
+
+          {agreedSavings.length > 0 && (
+            <table style={{ width: '100%', fontSize: '13px', borderCollapse: 'collapse', marginTop: '12px' }}>
+              <thead>
+                <tr style={{ background: '#f8fafc' }}>
+                  <th style={{ padding: '6px', textAlign: 'left' }}>Year</th>
+                  <th style={{ padding: '6px', textAlign: 'left' }}>First-time</th>
+                  <th style={{ padding: '6px', textAlign: 'left' }}>Renewal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {agreedSavings.map(a => (
+                  <tr key={a._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '6px' }}>{a.year}</td>
+                    <td style={{ padding: '6px' }}>UGX {(a.membershipFee || 0).toLocaleString()}</td>
+                    <td style={{ padding: '6px' }}>UGX {(a.membershipRenewalFee || 0).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+const labelFor = (cat) => {
+  const labels = {
+    monthly: 'Monthly Savings',
+    extra: 'Extra Savings',
+    penalty: 'Penalty',
+    donation: 'Donation',
+    misc: 'Miscellaneous',
+    shares: 'Shares',
+    membership: 'Membership'
+  };
+  return labels[cat] || cat;
+};
+
+const Btn = ({ children, onClick, color, type = 'button' }) => (
+  <button type={type} onClick={onClick} style={{ padding: '10px 18px', background: color, color: '#fff', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>{children}</button>
+);
+
+const btnMini = (bg) => ({ padding: '8px 14px', background: bg, color: '#fff', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' });
+
+const Card = ({ title, value, color, bg, icon }) => (
+  <div style={{ background: bg, padding: '18px 20px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div>
+      <div style={{ fontSize: '14px', color, fontWeight: '500' }}>{title}</div>
+      <div style={{ fontSize: '26px', fontWeight: '700', color }}>UGX {value.toLocaleString()}</div>
+    </div>
+    <span style={{ fontSize: '30px' }}>{icon}</span>
+  </div>
+);
+
+const Modal = ({ children, onClose, title }) => (
+  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+    <div style={{ background: '#fff', padding: '30px', borderRadius: '16px', width: '520px', maxHeight: '90vh', overflow: 'auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+        <h2 style={{ margin: 0, color: '#1e293b' }}>{title}</h2>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+      </div>
+      {children}
+    </div>
+  </div>
+);
+
+const Field = ({ label, children }) => (
+  <div style={{ marginBottom: '14px' }}>
+    <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500', color: '#334155' }}>{label}</label>
+    {children}
+  </div>
+);
+
+const input = { width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px' };
+const td = { padding: '12px' }; 
+--- Saving.js model --- 
+const mongoose = require('mongoose');
+
+const SavingSchema = new mongoose.Schema({
+  memberId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Member',
+    default: null
+  },
+  category: {
+    type: String,
+    enum: ['monthly', 'extra', 'misc', 'donation', 'penalty', 'business_profit', 'shares', 'membership'],
+    required: true
+  },
+  amount: { type: Number, required: true, min: 0 },
+  description: { type: String, default: '' },
+  donorName: { type: String, default: '' },
+  donationType: { type: String, enum: ['', 'member', 'external'], default: '' },
+  membershipType: { type: String, enum: ['', 'first_time', 'renewal'], default: '' },
+  month: { type: String },
+  shareType: { type: String },
+  shareQuantity: { type: Number, default: 0 },
+  date: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+module.exports = mongoose.model('Saving', SavingSchema); 
+--- ClubSetting.js --- 
+const mongoose = require('mongoose');
+
+const ClubSettingSchema = new mongoose.Schema({
+  year: { type: Number, required: true, unique: true },
+  agreedMonthlyAmount: { type: Number, default: 0 },
+  membershipFee: { type: Number, default: 0 },
+  membershipRenewalFee: { type: Number, default: 0 }
+}, { timestamps: true });
+
+module.exports = mongoose.model('ClubSetting', ClubSettingSchema); 
+--- savingController.js --- 
+const Saving = require('../models/Saving');
+const Member = require('../models/Member');
+const ClubSetting = require('../models/ClubSetting');
+const Leader = require('../models/Leader');
+const PDFDocument = require('pdfkit');
+
+// Helper: format money
+const fmt = (n) => Number(n || 0).toLocaleString('en-UG');
+
+// Helper: draw professional header
+function drawHeader(doc, title) {
+  doc.rect(0, 0, doc.page.width, 90).fill('#0f3460');
+  doc.fillColor('#fff').fontSize(20).text('CRESTED SS INVESTMENT CLUB LTD', 50, 25, { align: 'left' });
+  doc.fontSize(11).text(title, 50, 55);
+  doc.fillColor('#000').moveDown(3);
+}
+
+// Helper: draw signature block
+async function drawSignatures(doc) {
+  const leaders = await Leader.find().sort('order');
+  const president = leaders.find(l => l.role === 'president');
+  const secretary = leaders.find(l => l.role === 'secretary');
+  const treasurer = leaders.find(l => l.role === 'treasurer');
+
+  doc.moveDown(2);
+  const y = doc.y;
+  const w = (doc.page.width - 100) / 3;
+
+  doc.fontSize(10).fillColor('#000');
+  const names = [
+    { title: 'President', name: president?.name || '' },
+    { title: 'Secretary', name: secretary?.name || '' },
+    { title: 'Treasurer', name: treasurer?.name || '' }
+  ];
+
+  names.forEach((n, i) => {
+    const x = 50 + (i * w);
+    doc.moveTo(x, y).lineTo(x + w - 30, y).stroke();
+    doc.text(n.title, x, y + 5, { width: w - 30 });
+    doc.fontSize(9).fillColor('#666').text(n.name, x, y + 20, { width: w - 30 });
+    doc.fontSize(8).text('Date: ______________', x, y + 35, { width: w - 30 });
+    doc.fontSize(10).fillColor('#000');
+  });
+}
+
+// ==================== ADD SAVING ====================
+exports.addSaving = async (req, res) => {
+  try {
+    const {
+      memberId, category, amount, description, month,
+      shareType, shareQuantity, date,
+      donationType, donorName, membershipType, paymentType
+    } = req.body;
+
+    const memberRequired = ['monthly', 'extra', 'penalty', 'membership', 'shares', 'misc'];
+    if (memberRequired.includes(category) && (!memberId || memberId.trim() === '')) {
+      return res.status(400).json({ error: 'Member required' });
+    }
+
+    let finalAmount = Number(amount) || 0;
+
+    // Membership fee amounts
+    if (category === 'membership') {
+      const year = new Date().getFullYear();
+      const setting = await ClubSetting.findOne({ year });
+      const type = membershipType || paymentType || 'first_time';
+      if (setting) {
+        if (type === 'renewal' && setting.membershipRenewalFee) {
+          finalAmount = setting.membershipRenewalFee;
+        } else if (setting.membershipFee) {
+          finalAmount = setting.membershipFee;
+        }
+      }
+    }
+
+    if (finalAmount <= 0) {
+      return res.status(400).json({ error: 'Amount must be greater than 0' });
+    }
+
+    const saving = new Saving({
+      memberId: memberRequired.includes(category) ? memberId : null,
+      category,
+      amount: finalAmount,
+      description: description || '',
+      donorName: donorName || '',
+      donationType: donationType || '',
+      membershipType: membershipType || paymentType || '',
+      month: month || '',
+      shareType: shareType || '',
+      shareQuantity: shareQuantity || 0,
+      date: date ? new Date(date) : new Date()
+    });
+
+    await saving.save();
+
+    // Update member savings if applicable
+    if (['monthly', 'extra'].includes(category) && memberId) {
+      const member = await Member.findById(memberId);
+      if (member) {
+        member.savings = (Number(member.savings) || 0) + finalAmount;
+        await member.save();
+      }
+    }
+
+    // Update member shares
+    if (category === 'shares' && memberId && shareType && shareQuantity) {
+      const member = await Member.findById(memberId);
+      if (member) {
+        member.shares[shareType] = (member.shares[shareType] || 0) + shareQuantity;
+        await member.save();
+      }
+    }
+
+    res.status(201).json({ success: true, saving });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// ==================== GET ALL ====================
+exports.getAllSavings = async (req, res) => {
+  try {
+    const savings = await Saving.find()
+      .populate('memberId', 'firstName surname memberNumber')
+      .sort('-date');
+    res.json(savings);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== SUMMARY ====================
+exports.getSummary = async (req, res) => {
+  try {
+    const all = await Saving.find();
+    const total = all.reduce((s, x) => s + Number(x.amount || 0), 0);
+
+    const memberTotal = all
+      .filter(s => ['monthly', 'extra'].includes(s.category))
+      .reduce((s, x) => s + Number(x.amount || 0), 0);
+
+    const capitalTotal = all
+      .filter(s => ['misc', 'donation', 'penalty', 'business_profit', 'shares', 'membership'].includes(s.category))
+      .reduce((s, x) => s + Number(x.amount || 0), 0);
+
+    res.json({
+      generalSavings: total,
+      memberSavings: memberTotal,
+      clubCapital: capitalTotal
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== MEMBER SAVINGS TABLE ====================
+exports.getMemberSavingsList = async (req, res) => {
+  try {
+    const members = await Member.find();
+    const all = await Saving.find();
+
+    const result = members.map(m => {
+      const ms = all.filter(s => s.memberId && s.memberId.toString() === m._id.toString());
+      const monthly = ms.filter(s => s.category === 'monthly').reduce((sum, s) => sum + Number(s.amount || 0), 0);
+      const extra = ms.filter(s => s.category === 'extra').reduce((sum, s) => sum + Number(s.amount || 0), 0);
+      const penalties = ms.filter(s => s.category === 'penalty').reduce((sum, s) => sum + Number(s.amount || 0), 0);
+      const membership = ms.filter(s => s.category === 'membership').reduce((sum, s) => sum + Number(s.amount || 0), 0);
+      const sharesValue = ms.filter(s => s.category === 'shares').reduce((sum, s) => sum + Number(s.amount || 0), 0);
+      const misc = ms.filter(s => s.category === 'misc').reduce((sum, s) => sum + Number(s.amount || 0), 0);
+      const donation = ms.filter(s => s.category === 'donation').reduce((sum, s) => sum + Number(s.amount || 0), 0);
+
+      return {
+        _id: m._id,
+        memberNumber: m.memberNumber,
+        name: `${m.firstName} ${m.surname}`,
+        monthlySavings: monthly,
+        extraSavings: extra,
+        totalSavings: monthly + extra,
+        penalties,
+        membership,
+        sharesValue,
+        misc,
+        donation
+      };
+    });
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+// ==================== AGREED SAVINGS ====================
+exports.getAgreedSavings = async (req, res) => {
+  try {
+    const settings = await ClubSetting.find().sort('-year');
+    const agreed = settings.map(s => ({
+      _id: s._id,
+      year: s.year,
+      amount: s.agreedMonthlyAmount || 0,
+      membershipFee: s.membershipFee || 0,
+      membershipRenewalFee: s.membershipRenewalFee || 0
+    }));
+    res.json(agreed);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+// ==================== MEMBERSHIP FEES ====================
+exports.getMembershipFees = async (req, res) => {
+  try {
+    const setting = await ClubSetting.findOne().sort('-year');
+    res.json({
+      firstTime: setting?.membershipFee || 0,
+      renewal: setting?.membershipRenewalFee || 0
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== SET AGREED MONTHLY ====================
+exports.setAgreedMonthly = async (req, res) => {
+  try {
+    const { year, amount } = req.body;
+    let setting = await ClubSetting.findOne({ year });
+    if (setting) setting.agreedMonthlyAmount = amount;
+    else setting = new ClubSetting({ year, agreedMonthlyAmount: amount });
+    await setting.save();
+    res.json({ success: true, setting });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// ==================== SET MEMBERSHIP FEES ====================
+exports.setMembershipFees = async (req, res) => {
+  try {
+    const { year, firstTime, renewal } = req.body;
+    let setting = await ClubSetting.findOne({ year });
+    if (!setting) setting = new ClubSetting({ year });
+    if (firstTime !== undefined) setting.membershipFee = firstTime;
+    if (renewal !== undefined) setting.membershipRenewalFee = renewal;
+    await setting.save();
+    res.json({ success: true, setting });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// ==================== SET MEMBERSHIP FEE (legacy) ====================
+exports.setMembershipFee = async (req, res) => {
+  try {
+    const { year, amount } = req.body;
+    let setting = await ClubSetting.findOne({ year });
+    if (setting) setting.membershipFee = amount;
+    else setting = new ClubSetting({ year, membershipFee: amount });
+    await setting.save();
+    res.json({ success: true, setting });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// ==================== GET SETTINGS ====================
+exports.getSettings = async (req, res) => {
+  try {
+    const settings = await ClubSetting.find().sort('-year');
+    res.json(settings);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== DELETE SAVING ====================
+exports.deleteSaving = async (req, res) => {
+  try {
+    const saving = await Saving.findById(req.params.id);
+    if (!saving) return res.status(404).json({ error: 'Transaction not found' });
+
+    // Reverse member savings if applicable
+    if (['monthly', 'extra'].includes(saving.category) && saving.memberId) {
+      const member = await Member.findById(saving.memberId);
+      if (member) {
+        member.savings = Math.max(0, (Number(member.savings) || 0) - Number(saving.amount || 0));
+        await member.save();
+      }
+    }
+
+    // Reverse shares if applicable
+    if (saving.category === 'shares' && saving.memberId && saving.shareType) {
+      const member = await Member.findById(saving.memberId);
+      if (member) {
+        member.shares[saving.shareType] = Math.max(0, (member.shares[saving.shareType] || 0) - (saving.shareQuantity || 0));
+        await member.save();
+      }
+    }
+
+    await Saving.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: 'Transaction deleted' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== MEMBER STATEMENT PDF ====================
+exports.downloadMemberStatement = async (req, res) => {
+  try {
+    const member = await Member.findById(req.params.memberId);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+
+    const savings = await Saving.find({ memberId: member._id }).sort('date');
+
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=statement-${member.memberNumber}.pdf`);
+    doc.pipe(res);
+
+    drawHeader(doc, 'Member Savings Statement');
+
+    doc.fillColor('#000').fontSize(11);
+    doc.text(`Member: ${member.firstName} ${member.surname}`, 50, 110);
+    doc.text(`Member No: ${member.memberNumber}`);
+    doc.text(`Generated: ${new Date().toLocaleString()}`);
+    doc.moveDown();
+
+    // Table header
+    const startY = doc.y;
+    doc.rect(50, startY, doc.page.width - 100, 22).fill('#0f3460');
+    doc.fillColor('#fff').fontSize(10);
+    doc.text('Date', 60, startY + 6);
+    doc.text('Category', 140, startY + 6);
+    doc.text('Description', 240, startY + 6);
+    doc.text('Amount (UGX)', 420, startY + 6, { width: 100, align: 'right' });
+    doc.moveDown();
+
+    let total = 0;
+    let y = startY + 26;
+    doc.fillColor('#000');
+    savings.forEach((s, i) => {
+      if (y > doc.page.height - 200) { doc.addPage(); y = 50; }
+      if (i % 2 === 0) doc.rect(50, y - 3, doc.page.width - 100, 20).fill('#f8fafc');
+      doc.fillColor('#000').fontSize(9);
+      doc.text(new Date(s.date).toLocaleDateString(), 60, y);
+      doc.text(s.category, 140, y);
+      doc.text(s.description || '—', 240, y, { width: 170 });
+      doc.text(fmt(s.amount), 420, y, { width: 100, align: 'right' });
+      total += Number(s.amount || 0);
+      y += 20;
+    });
+
+    // Total
+    doc.moveDown();
+    doc.rect(50, y + 5, doc.page.width - 100, 25).fill('#dcfce7');
+    doc.fillColor('#065f46').fontSize(12).font('Helvetica-Bold');
+    doc.text('TOTAL SAVINGS:', 60, y + 12);
+    doc.text(`UGX ${fmt(total)}`, 380, y + 12, { width: 140, align: 'right' });
+    doc.font('Helvetica');
+
+    // Signatures
+    doc.y = y + 40;
+    await drawSignatures(doc);
+
+    doc.end();
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== CLUB CAPITAL PDF ====================
+exports.downloadClubCapitalReport = async (req, res) => {
+  try {
+    const capital = await Saving.find({
+      category: { $in: ['misc', 'donation', 'penalty', 'business_profit', 'shares', 'membership'] }
+    }).populate('memberId', 'firstName surname').sort('date');
+
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename=club-capital-report.pdf');
+    doc.pipe(res);
+
+    drawHeader(doc, 'Club Capital Report');
+
+    doc.fillColor('#000').fontSize(11);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, 50, 110);
+    doc.moveDown();
+
+    const startY = doc.y;
+    doc.rect(50, startY, doc.page.width - 100, 22).fill('#0f3460');
+    doc.fillColor('#fff').fontSize(10);
+    doc.text('Date', 60, startY + 6);
+    doc.text('Member', 130, startY + 6);
+    doc.text('Category', 220, startY + 6);
+    doc.text('Description', 300, startY + 6);
+    doc.text('Amount (UGX)', 420, startY + 6, { width: 100, align: 'right' });
+    doc.moveDown();
+
+    let total = 0;
+    let y = startY + 26;
+    doc.fillColor('#000');
+    capital.forEach((s, i) => {
+      if (y > doc.page.height - 200) { doc.addPage(); y = 50; }
+      if (i % 2 === 0) doc.rect(50, y - 3, doc.page.width - 100, 20).fill('#f8fafc');
+      doc.fillColor('#000').fontSize(9);
+      doc.text(new Date(s.date).toLocaleDateString(), 60, y);
+      const mname = s.memberId ? `${s.memberId.firstName || ''} ${s.memberId.surname || ''}`.trim() : (s.donorName || 'Club');
+      doc.text(mname || '—', 130, y, { width: 85 });
+      doc.text(s.category, 220, y);
+      doc.text(s.description || '—', 300, y, { width: 110 });
+      doc.text(fmt(s.amount), 420, y, { width: 100, align: 'right' });
+      total += Number(s.amount || 0);
+      y += 20;
+    });
+
+    doc.moveDown();
+    doc.rect(50, y + 5, doc.page.width - 100, 25).fill('#fef9e7');
+    doc.fillColor('#b45309').fontSize(12).font('Helvetica-Bold');
+    doc.text('TOTAL CLUB CAPITAL:', 60, y + 12);
+    doc.text(`UGX ${fmt(total)}`, 380, y + 12, { width: 140, align: 'right' });
+    doc.font('Helvetica');
+
+    doc.y = y + 40;
+    await drawSignatures(doc);
+
+    doc.end();
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== GENERAL REPORT PDF ====================
+exports.downloadGeneralReport = async (req, res) => {
+  try {
+    const all = await Saving.find().populate('memberId', 'firstName surname memberNumber').sort('date');
+
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename=general-savings-report.pdf');
+    doc.pipe(res);
+
+    drawHeader(doc, 'General Savings Report');
+
+    doc.fillColor('#000').fontSize(11);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, 50, 110);
+    doc.text(`Total Transactions: ${all.length}`);
+    doc.moveDown();
+
+    const startY = doc.y;
+    doc.rect(50, startY, doc.page.width - 100, 22).fill('#0f3460');
+    doc.fillColor('#fff').fontSize(9);
+    doc.text('Date', 60, startY + 6);
+    doc.text('Member', 120, startY + 6);
+    doc.text('Category', 220, startY + 6);
+    doc.text('Description', 300, startY + 6);
+    doc.text('Amount', 420, startY + 6, { width: 100, align: 'right' });
+    doc.moveDown();
+
+    let total = 0;
+    let y = startY + 26;
+    doc.fillColor('#000');
+    all.forEach((s, i) => {
+      if (y > doc.page.height - 200) { doc.addPage(); y = 50; }
+      if (i % 2 === 0) doc.rect(50, y - 3, doc.page.width - 100, 20).fill('#f8fafc');
+      doc.fillColor('#000').fontSize(9);
+      doc.text(new Date(s.date).toLocaleDateString(), 60, y);
+      const mname = s.memberId ? `${s.memberId.firstName || ''} ${s.memberId.surname || ''}`.trim() : (s.donorName || 'Club');
+      doc.text(mname || '—', 120, y, { width: 95 });
+      doc.text(s.category, 220, y);
+      doc.text(s.description || '—', 300, y, { width: 110 });
+      doc.text(fmt(s.amount), 420, y, { width: 100, align: 'right' });
+      total += Number(s.amount || 0);
+      y += 20;
+    });
+
+    doc.moveDown();
+    doc.rect(50, y + 5, doc.page.width - 100, 25).fill('#e0f2fe');
+    doc.fillColor('#0369a1').fontSize(12).font('Helvetica-Bold');
+    doc.text('GRAND TOTAL:', 60, y + 12);
+    doc.text(`UGX ${fmt(total)}`, 380, y + 12, { width: 140, align: 'right' });
+    doc.font('Helvetica');
+
+    doc.y = y + 40;
+    await drawSignatures(doc);
+
+    doc.end();
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== EXTERNAL DONATIONS ====================
+exports.getExternalDonations = async (req, res) => {
+  try {
+    const donations = await Saving.find({
+      category: 'donation',
+      donationType: 'external'
+    }).sort('-date');
+
+    const total = donations.reduce((s, d) => s + Number(d.amount || 0), 0);
+
+    res.json({ donations, total });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== EXTERNAL DONATIONS PDF ====================
+exports.externalDonationsPDF = async (req, res) => {
+  try {
+    const donations = await Saving.find({
+      category: 'donation',
+      donationType: 'external'
+    }).sort('-date');
+
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename=external-donations.pdf');
+    doc.pipe(res);
+
+    drawHeader(doc, 'External Donations Report');
+
+    doc.fillColor('#000').fontSize(11);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, 50, 110);
+    doc.text(`Total Donations: UGX ${fmt(donations.reduce((s, d) => s + Number(d.amount || 0), 0))}`);
+    doc.moveDown();
+
+    const startY = doc.y;
+    doc.rect(50, startY, doc.page.width - 100, 22).fill('#0f3460');
+    doc.fillColor('#fff').fontSize(10);
+    doc.text('Date', 60, startY + 6);
+    doc.text('Donor Name', 150, startY + 6);
+    doc.text('Description', 320, startY + 6);
+    doc.text('Amount (UGX)', 430, startY + 6, { width: 100, align: 'right' });
+    doc.moveDown();
+
+    let total = 0;
+    let y = startY + 26;
+    doc.fillColor('#000');
+    donations.forEach((d, i) => {
+      if (y > doc.page.height - 200) { doc.addPage(); y = 50; }
+      if (i % 2 === 0) doc.rect(50, y - 3, doc.page.width - 100, 20).fill('#f8fafc');
+      doc.fillColor('#000').fontSize(9);
+      doc.text(new Date(d.date).toLocaleDateString(), 60, y);
+      doc.text(d.donorName || 'Anonymous', 150, y, { width: 160 });
+      doc.text(d.description || '—', 320, y, { width: 100 });
+      doc.text(fmt(d.amount), 430, y, { width: 100, align: 'right' });
+      total += Number(d.amount || 0);
+      y += 20;
+    });
+
+    doc.moveDown();
+    doc.rect(50, y + 5, doc.page.width - 100, 25).fill('#fef9e7');
+    doc.fillColor('#b45309').fontSize(12).font('Helvetica-Bold');
+    doc.text('TOTAL EXTERNAL DONATIONS:', 60, y + 12);
+    doc.text(`UGX ${fmt(total)}`, 380, y + 12, { width: 140, align: 'right' });
+    doc.font('Helvetica');
+
+    doc.y = y + 40;
+    await drawSignatures(doc);
+
+    doc.end();
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}; 
+--- savings.routes.js --- 
+const express = require('express');
+const router = express.Router();
+const savingController = require('../controllers/savingController');
+
+// Savings
+router.post('/add', savingController.addSaving);
+router.get('/', savingController.getAllSavings);
+router.get('/summary', savingController.getSummary);
+router.get('/members', savingController.getMemberSavingsList);
+router.delete('/:id', savingController.deleteSaving);
+
+// Settings
+router.get('/agreed-savings', savingController.getAgreedSavings);
+router.get('/membership-fees', savingController.getMembershipFees);
+router.post('/settings/agreed-monthly', savingController.setAgreedMonthly);
+router.post('/settings/membership-fees', savingController.setMembershipFees);
+router.post('/settings/membership-fee', savingController.setMembershipFee);
+router.get('/settings', savingController.getSettings);
+
+// PDFs
+router.get('/member-statement/:memberId', savingController.downloadMemberStatement);
+router.get('/club-capital-report', savingController.downloadClubCapitalReport);
+router.get('/general-report', savingController.downloadGeneralReport);
+
+// External donations
+router.get('/external-donations', savingController.getExternalDonations);
+router.get('/external-donations/pdf', savingController.externalDonationsPDF);
+
+module.exports = router;

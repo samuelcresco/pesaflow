@@ -1,0 +1,34 @@
+============================================================
+BACKUP: SAVINGS CARD - WORKING
+Date: 22/09/2026
+============================================================
+
+# FRONTEND FILE: D:\PesaFlow\frontend\src\app\savings\page.js
+
+[paste the content of savings/page.js here - the file you just saved]
+
+============================================================
+
+# BACKEND FILE: D:\PesaFlow\backend\models\Saving.js
+
+[paste the content here]
+
+============================================================
+
+# BACKEND FILE: D:\PesaFlow\backend\models\ClubSetting.js
+
+[paste the content here]
+
+============================================================
+
+# BACKEND FILE: D:\PesaFlow\backend\controllers\savingController.js
+
+[paste the content here]
+
+============================================================
+
+# BACKEND FILE: D:\PesaFlow\backend\routes\savings.routes.js
+
+[paste the content here]
+
+============================================================

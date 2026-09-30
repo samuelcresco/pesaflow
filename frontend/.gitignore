@@ -13,9 +13,10 @@ node_modules/
 # Production build
 /build
 
-# Environment variables
-.env*.local
-.env.production
+# Environment variables — CRITICAL
+.env
+.env.*
+!.env.example
 
 # Vercel
 .vercel
@@ -52,3 +53,20 @@ pids
 
 # Optional eslint cache
 .eslintcache
+
+# Expo
+.expo/
+
+# Android build output only (keep source, ignore output)
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/.idea/
+
+# Helper scripts (dev tools, not part of the app)
+fix-all.js
+fix-routes.js
+fix_routes.bat
+force-fix.js
+nuke-routes.js

@@ -1,35 +1,24 @@
 {
   "name": "pesaflow",
   "version": "1.0.0",
-  "description": "PesaFlow - Financial Management System",
+  "description": "Backend for PesaFlow",
   "main": "app.js",
   "scripts": {
+    "dev": "set MONGO_URI=mongodb://localhost:27017/pesaflow && nodemon app.js",
     "start": "node app.js",
-    "dev": "nodemon app.js",
-    "seed": "node scripts/seedUsers.js",
-    "seed:fresh": "node scripts/seedUsers.js",
-    "dev:fresh": "npm run seed && npm run dev",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "seed": "node seed.js"
   },
-  "keywords": [
-    "finance",
-    "api",
-    "mongodb",
-    "express"
-  ],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
-    "bcryptjs": "^3.0.2",
-    "cors": "^2.8.5",
-    "dotenv": "^16.5.0",
-    "express": "^4.21.2",
-    "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.16.0"
-  
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.10"
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.2",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.0",
+    "mongoose": "^7.8.12",
+    "morgan": "^1.12.0",
+    "nodemon": "^3.0.0",
+    "pdfkit": "^0.20.2",
+    "qrcode": "^1.5.4"
   }
 }

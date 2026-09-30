@@ -1,0 +1,1355 @@
+=== LAYOUT === 
+import type { Metadata } from 'next';
+import './globals.css';
+
+export const metadata: Metadata = {
+  title: 'PesaFlow - SACCO Management Platform',
+  description: 'Modern SACCO management system for financial institutions',
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en">
+      <body className="font-inter bg-gray-50 text-gray-900 min-h-screen">
+        {children}
+      </body>
+    </html>
+  );
+} 
+=== SAVINGS === 
+'use client';
+
+import { useEffect, useState } from 'react';
+
+export default function SavingsPage() {
+  const [summary, setSummary] = useState({ generalSavings: 0, memberSavings: 0, clubCapital: 0 });
+  const [memberSavings, setMemberSavings] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(null);
+  const [form, setForm] = useState({
+    memberId: '',
+    amount: '',
+    description: '',
+    month: '',
+    shareType: 'golden',
+    shareQuantity: 1,
+    date: new Date().toISOString().split('T')[0]
+  });
+  const [setup, setSetup] = useState({ year: new Date().getFullYear(), amount: '' });
+
+  useEffect(() => { fetchAll(); }, []);
+
+  const fetchAll = async () => {
+    try {
+      const [s, m, mem] = await Promise.all([
+        fetch('http://localhost:5000/api/savings/summary').then(r => r.json()),
+        fetch('http://localhost:5000/api/savings/members').then(r => r.json()),
+        fetch('http://localhost:5000/api/members').then(r => r.json())
+      ]);
+      setSummary(s);
+      setMemberSavings(Array.isArray(m) ? m : []);
+      setMembers(Array.isArray(mem) ? mem : []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const addSaving = async (e) => {
+    e.preventDefault();
+    const payload = { ...form, category: modal };
+    if (modal === 'monthly' || modal === 'membership') delete payload.amount;
+    try {
+      const res = await fetch('http://localhost:5000/api/savings/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        alert('Saved!');
+        setModal(null);
+        setForm({
+          memberId: '',
+          amount: '',
+          description: '',
+          month: '',
+          shareType: 'golden',
+          shareQuantity: 1,
+          date: new Date().toISOString().split('T')[0]
+        });
+        fetchAll();
+      } else {
+        const d = await res.json();
+        alert(d.error);
+      }
+    } catch (err) {
+      alert('Network error');
+    }
+  };
+
+  const saveSetup = async (type) => {
+    try {
+      const res = await fetch(`http://localhost:5000/api/savings/settings/${type}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ year: setup.year, amount: parseFloat(setup.amount) })
+      });
+      if (res.ok) {
+        alert('Saved!');
+        setModal(null);
+      }
+    } catch (err) {
+      alert('Error');
+    }
+  };
+
+  const openPDF = (url) => window.open(`http://localhost:5000/api/savings/${url}`, '_blank');
+
+  if (loading) return <div style={{ padding: '40px' }}>Loading...</div>;
+
+  return (
+    <div style={{ padding: '24px', maxWidth: '1300px', margin: '0 auto', fontFamily: 'Segoe UI, sans-serif' }}>
+      <h1 style={{ color: '#1e293b' }}>💰 Savings & Income</h1>
+
+      {/* Action Buttons */}
+      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '24px' }}>
+        <Btn onClick={() => setModal('monthly')} color="#2563eb">➕ Add Monthly Savings</Btn>
+        <Btn onClick={() => setModal('extra')} color="#22c55e">➕ Add Extra Savings</Btn>
+        <Btn onClick={() => setModal('penalty')} color="#ef4444">➕ Add Penalty</Btn>
+        <Btn onClick={() => setModal('shares')} color="#8b5cf6">🛒 Buy Shares</Btn>
+        <Btn onClick={() => setModal('agreed')} color="#6b7280">⚙️ Set Agreed Savings</Btn>
+        <Btn onClick={() => setModal('membership-fee')} color="#4b5563">⚙️ Set Membership Fee</Btn>
+        <Btn onClick={() => setModal('donation')} color="#f59e0b">➕ Add Donation</Btn>
+        <Btn onClick={() => setModal('business_profit')} color="#0891b2">➕ Add Business Profit</Btn>
+        <Btn onClick={() => setModal('misc')} color="#eab308">➕ Add Miscellaneous</Btn>
+      </div>
+
+      {/* PDF Reports */}
+      <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', marginBottom: '24px', border: '1px solid #e5e7eb' }}>
+  <div style={{ fontWeight: '600', marginBottom: '10px', color: '#1e293b' }}>📊 Generate Reports</div>
+  
+  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+    <Btn onClick={() => openPDF(`club-capital-report?from=${reportFrom}&to=${reportTo}`)} color="#1e40af">📄 Club Capital Report</Btn>
+    <Btn onClick={() => openPDF(`general-report?from=${reportFrom}&to=${reportTo}`)} color="#7c3aed">📊 General Report</Btn>
+    <Btn onClick={() => { setReportFrom(today); setReportTo(today); setTimeout(() => openPDF(`general-report?period=today`), 100); }} color="#0891b2">Today</Btn>
+    <Btn onClick={() => openPDF('general-report?period=this_month')} color="#2563eb">This Month</Btn>
+    <Btn onClick={() => openPDF('general-report?period=this_year')} color="#22c55e">This Year</Btn>
+    <Btn onClick={() => openPDF('general-report?period=last_month')} color="#f59e0b">Last Month</Btn>
+    <Btn onClick={() => openPDF('general-report?period=last_year')} color="#ef4444">Last Year</Btn>
+  </div>
+</div>
+      {/* Summary Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '28px' }}>
+        <Card title="General Savings" value={summary.generalSavings || 0} color="#0369a1" bg="#e0f2fe" icon="🏦" />
+        <Card title="Total Member Savings" value={summary.memberSavings || 0} color="#15803d" bg="#dcfce7" icon="👥" />
+        <Card title="Total Club Capital" value={summary.clubCapital || 0} color="#b45309" bg="#fef9e7" icon="🏛️" />
+      </div>
+
+      {/* Member Savings Table */}
+      <h2 style={{ color: '#1e293b' }}>Member Savings</h2>
+      <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid #e5e7eb', marginTop: '12px' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+          <thead>
+            <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e5e7eb' }}>
+              {['Member','Member No.','Monthly','Extra','Total','Penalties','Membership','Shares Value','Actions'].map(h => (
+                <th key={h} style={{ padding: '12px', textAlign: 'left', fontWeight: '600', color: '#334155' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {memberSavings.length === 0 ? (
+              <tr>
+                <td colSpan="9" style={{ padding: '20px', textAlign: 'center', color: '#6b7280' }}>No savings yet.</td>
+              </tr>
+            ) : memberSavings.map((m, i) => (
+              <tr key={m._id} style={{ borderBottom: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#fafbfc' }}>
+                <td style={td}>{m.name}</td>
+                <td style={td}>{m.memberNumber}</td>
+                <td style={td}>UGX {m.monthlySavings.toLocaleString()}</td>
+                <td style={td}>UGX {m.extraSavings.toLocaleString()}</td>
+                <td style={{ ...td, fontWeight: '600', color: '#15803d' }}>UGX {m.totalSavings.toLocaleString()}</td>
+                <td style={td}>{m.penalties ? `UGX ${m.penalties.toLocaleString()}` : '-'}</td>
+                <td style={td}>{m.membership ? `UGX ${m.membership.toLocaleString()}` : '-'}</td>
+                <td style={td}>{m.sharesValue ? `UGX ${m.sharesValue.toLocaleString()}` : '-'}</td>
+                <td style={td}>
+                  <button
+                    onClick={() => openPDF(`member-statement/${m._id}`)}
+                    style={{ padding: '5px 12px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}
+                  >
+                    📄 Statement
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Add Saving Modal */}
+      {modal && modal !== 'agreed' && modal !== 'membership-fee' && (
+        <Modal onClose={() => setModal(null)} title={`Add ${labelFor(modal)}`}>
+          <form onSubmit={addSaving}>
+            {['monthly','extra','penalty','membership','shares','misc'].includes(modal) && (
+              <Field label="Member">
+                <select value={form.memberId} onChange={e => setForm({ ...form, memberId: e.target.value })} required style={input}>
+                  <option value="">Select Member</option>
+                  {members.map(m => (
+                    <option key={m._id} value={m._id}>
+                      {m.firstName} {m.surname} ({m.memberNumber})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+
+            {modal === 'monthly' && (
+              <Field label="Month">
+                <input type="text" value={form.month} onChange={e => setForm({ ...form, month: e.target.value })} placeholder="January 2015" style={input} />
+              </Field>
+            )}
+
+            {modal === 'shares' && (
+              <>
+                <Field label="Share Type">
+                  <select value={form.shareType} onChange={e => setForm({ ...form, shareType: e.target.value })} style={input}>
+                    <option value="golden">Golden</option>
+                    <option value="platinum">Platinum</option>
+                    <option value="silver">Silver</option>
+                    <option value="bronze">Bronze</option>
+                  </select>
+                </Field>
+                <Field label="Quantity">
+                  <input type="number" min="1" value={form.shareQuantity} onChange={e => setForm({ ...form, shareQuantity: parseInt(e.target.value) })} style={input} />
+                </Field>
+              </>
+            )}
+
+            {!['monthly','membership'].includes(modal) && (
+              <Field label="Amount (UGX)">
+                <input type="number" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required style={input} />
+              </Field>
+            )}
+
+            <Field label="Date">
+  <input
+    type="date"
+    value={form.date}
+    onChange={e => setForm({ ...form, date: e.target.value })}
+    min="2015-01-01"
+    required
+    style={input}
+  />
+</Field>
+
+            <Field label="Description (optional)">
+              <input type="text" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} style={input} />
+            </Field>
+
+            <Btn type="submit" color="#2563eb">Save</Btn>
+          </form>
+        </Modal>
+      )}
+
+      {/* Setup Modal */}
+      {(modal === 'agreed' || modal === 'membership-fee') && (
+        <Modal onClose={() => setModal(null)} title={modal === 'agreed' ? 'Set Agreed Monthly Savings' : 'Set Membership Fee'}>
+          <Field label="Year">
+            <input type="number" value={setup.year} onChange={e => setSetup({ ...setup, year: parseInt(e.target.value) })} style={input} />
+          </Field>
+          <Field label="Amount (UGX)">
+            <input type="number" value={setup.amount} onChange={e => setSetup({ ...setup, amount: e.target.value })} style={input} />
+          </Field>
+          <Btn onClick={() => saveSetup(modal === 'agreed' ? 'agreed-monthly' : 'membership-fee')} color="#22c55e">Save</Btn>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ==================== HELPERS ====================
+const labelFor = (cat) => ({
+  monthly: 'Monthly Savings',
+  extra: 'Extra Savings',
+  penalty: 'Penalty',
+  donation: 'Donation',
+  misc: 'Miscellaneous',
+  business_profit: 'Business Profit',
+  shares: 'Shares'
+}[cat] || cat);
+
+const Btn = ({ children, onClick, color, type = 'button' }) => (
+  <button type={type} onClick={onClick} style={{ padding: '10px 18px', background: color, color: '#fff', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>
+    {children}
+  </button>
+);
+
+const Card = ({ title, value, color, bg, icon }) => (
+  <div style={{ background: bg, padding: '18px 20px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div>
+      <div style={{ fontSize: '14px', color, fontWeight: '500' }}>{title}</div>
+      <div style={{ fontSize: '26px', fontWeight: '700', color }}>UGX {value.toLocaleString()}</div>
+    </div>
+    <span style={{ fontSize: '30px' }}>{icon}</span>
+  </div>
+);
+
+const Modal = ({ children, onClose, title }) => (
+  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+    <div style={{ background: '#fff', padding: '30px', borderRadius: '16px', width: '480px', maxHeight: '90vh', overflow: 'auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+        <h2 style={{ margin: 0, color: '#1e293b' }}>{title}</h2>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+      </div>
+      {children}
+    </div>
+  </div>
+);
+
+const Field = ({ label, children }) => (
+  <div style={{ marginBottom: '14px' }}>
+    <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500', color: '#334155' }}>{label}</label>
+    {children}
+  </div>
+);
+
+const input = { width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px' };
+const td = { padding: '12px' };
+ 
+=== LOANS === 
+'use client';
+import { useEffect, useState } from 'react';
+
+export default function LoansPage() {
+  const [loans, setLoans] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('all');
+  const [showApply, setShowApply] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settings, setSettings] = useState(null);
+  const [eligibility, setEligibility] = useState(null);
+  const [error, setError] = useState('');
+  const [form, setForm] = useState({
+    memberId: '', type: 'emergency', amount: '', duration: '',
+    scheduleUnit: 'weekly', purpose: ''
+  });
+
+  useEffect(() => { fetchAll(); fetchSettings(); }, []);
+
+  const fetchAll = async () => {
+    try {
+      const [l, m] = await Promise.all([
+        fetch('http://localhost:5000/api/loans').then(r => r.json()),
+        fetch('http://localhost:5000/api/members').then(r => r.json())
+      ]);
+      setLoans(Array.isArray(l) ? l : []);
+      setMembers(Array.isArray(m) ? m : []);
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
+  };
+
+  const fetchSettings = async () => {
+    try {
+      const res = await fetch('http://localhost:5000/api/settings');
+      if (res.ok) setSettings(await res.json());
+    } catch (err) { console.error(err); }
+  };
+
+  const checkEligibility = async (memberId, type) => {
+    if (!memberId || !type) return;
+    try {
+      const res = await fetch(`http://localhost:5000/api/loans/eligibility/${memberId}/${type}`);
+      const data = await res.json();
+      setEligibility(data);
+      if (data.eligible) setForm(f => ({ ...f, duration: data.duration, scheduleUnit: data.scheduleUnit }));
+    } catch (err) { console.error(err); }
+  };
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    const newForm = { ...form, [name]: value };
+    setForm(newForm);
+    if (name === 'memberId' || name === 'type') {
+      checkEligibility(
+        name === 'memberId' ? value : newForm.memberId,
+        name === 'type' ? value : newForm.type
+      );
+    }
+  };
+
+  const submitLoan = async (e) => {
+    e.preventDefault();
+    setError('');
+    try {
+      const res = await fetch('http://localhost:5000/api/loans/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          memberId: form.memberId, type: form.type,
+          amount: parseFloat(form.amount),
+          duration: parseInt(form.duration),
+          scheduleUnit: form.scheduleUnit,
+          purpose: form.purpose
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert('Loan submitted!');
+        setShowApply(false);
+        setForm({ memberId: '', type: 'emergency', amount: '', duration: '', scheduleUnit: 'weekly', purpose: '' });
+        setEligibility(null);
+        fetchAll();
+      } else setError(data.error || 'Failed');
+    } catch (err) { setError('Network error'); }
+  };
+
+  const updateStatus = async (loanId, status) => {
+    try {
+      const res = await fetch(`http://localhost:5000/api/loans/${loanId}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+      });
+      if (res.ok) fetchAll();
+    } catch (err) { console.error(err); }
+  };
+
+  const saveSettings = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('http://localhost:5000/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings)
+      });
+      if (res.ok) { alert('Settings saved'); setShowSettings(false); }
+    } catch (err) { console.error(err); }
+  };
+
+  const downloadSchedule = (loanId) => window.open(`http://localhost:5000/api/loans/${loanId}/schedule`, '_blank');
+
+  const filteredLoans = activeTab === 'all' ? loans : loans.filter(l => l.status === activeTab);
+  const total = loans.length;
+  const pending = loans.filter(l => l.status === 'pending').length;
+  const active = loans.filter(l => l.status === 'active').length;
+  const closed = loans.filter(l => l.status === 'closed').length;
+
+  if (loading) return <div style={{ padding: '40px', textAlign: 'center' }}>Loading loans...</div>;
+
+  return (
+    <div style={{ padding: '24px', maxWidth: '1300px', margin: '0 auto', fontFamily: 'Segoe UI, system-ui, sans-serif' }}>
+      <h1 style={{ fontSize: '28px', marginBottom: '24px', color: '#1a1a2e' }}>📋 Loan Management</h1>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '28px' }}>
+        <SummaryCard title="Total Loans" value={total} color="#0369a1" bgGrad="linear-gradient(135deg, #e0f2fe, #b8e1fc)" icon="📊" />
+        <SummaryCard title="Pending" value={pending} color="#b45309" bgGrad="linear-gradient(135deg, #fef9e7, #fdebb0)" icon="⏳" />
+        <SummaryCard title="Active" value={active} color="#15803d" bgGrad="linear-gradient(135deg, #dcfce7, #bbf7d0)" icon="✅" />
+        <SummaryCard title="Closed" value={closed} color="#475569" bgGrad="linear-gradient(135deg, #f1f5f9, #e2e8f0)" icon="🔒" />
+      </div>
+
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
+        <GradientBtn onClick={() => setShowApply(true)} gradient="linear-gradient(135deg, #2563eb, #1d4ed8)" shadow="rgba(37,99,235,0.35)">➕ New Loan Application</GradientBtn>
+        <GradientBtn onClick={() => setShowSettings(true)} gradient="linear-gradient(135deg, #6b7280, #4b5563)" shadow="rgba(107,114,128,0.35)">⚙️ Loan Settings</GradientBtn>
+      </div>
+
+      <div style={{ display: 'flex', gap: '2px', borderBottom: '2px solid #e5e7eb', marginBottom: '20px', flexWrap: 'wrap' }}>
+        {['all', 'pending', 'approved', 'disbursed', 'active', 'closed', 'rejected', 'writeOff'].map(tab => (
+          <button key={tab} onClick={() => setActiveTab(tab)} style={{
+            padding: '10px 20px', background: 'transparent', border: 'none',
+            borderBottom: activeTab === tab ? '3px solid #2563eb' : '3px solid transparent',
+            color: activeTab === tab ? '#1e293b' : '#64748b',
+            fontWeight: activeTab === tab ? '600' : '500',
+            fontSize: '14px', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '-2px'
+          }}>
+            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {filteredLoans.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '60px 20px', color: '#6b7280', background: '#f9fafb', borderRadius: '12px' }}>
+          <p style={{ fontSize: '16px', marginBottom: '0' }}>No loans found in this category.</p>
+        </div>
+      ) : (
+        <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid #e5e7eb' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+            <thead>
+              <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e5e7eb' }}>
+                <th style={th}>Member</th><th style={th}>Type</th><th style={th}>Amount</th>
+                <th style={th}>Rate</th><th style={th}>Total Repayable</th><th style={th}>Status</th>
+                <th style={th}>Applied By</th><th style={th}>Actions</th><th style={th}>Docs</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredLoans.map((loan, i) => {
+                const sc = statusColor(loan.status);
+                return (
+                  <tr key={loan._id} style={{ borderBottom: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#fafbfc' }}>
+                    <td style={td}>{loan.memberId?.firstName} {loan.memberId?.surname}</td>
+                    <td style={{ ...td, textTransform: 'capitalize' }}>{loan.type?.replace('_', ' ')}</td>
+                    <td style={{ ...td, fontWeight: '500' }}>UGX {loan.amount?.toLocaleString()}</td>
+                    <td style={td}>{loan.interestRate}%</td>
+                    <td style={{ ...td, fontWeight: '500' }}>UGX {loan.totalRepayable?.toLocaleString()}</td>
+                    <td style={td}>
+                      <span style={{ background: sc.bg, color: sc.text, padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '600', textTransform: 'capitalize' }}>
+                        {loan.status}
+                      </span>
+                    </td>
+                    <td style={{ ...td, textTransform: 'capitalize' }}>{loan.appliedBy}</td>
+                    <td style={td}>
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                        {loan.status === 'pending' && (<>
+                          <ActionBtn onClick={() => updateStatus(loan._id, 'approved')} color="#22c55e">Approve</ActionBtn>
+                          <ActionBtn onClick={() => updateStatus(loan._id, 'rejected')} color="#ef4444">Reject</ActionBtn>
+                        </>)}
+                        {loan.status === 'approved' && <ActionBtn onClick={() => updateStatus(loan._id, 'disbursed')} color="#f59e0b">Disburse</ActionBtn>}
+                        {loan.status === 'disbursed' && <ActionBtn onClick={() => updateStatus(loan._id, 'active')} color="#8b5cf6">Set Active</ActionBtn>}
+                        {loan.status === 'active' && <ActionBtn onClick={() => updateStatus(loan._id, 'closed')} color="#6b7280">Close</ActionBtn>}
+                      </div>
+                    </td>
+                    <td style={td}>
+                      <ActionBtn onClick={() => downloadSchedule(loan._id)} color="#3b82f6">📄 Schedule</ActionBtn>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showApply && (
+        <Modal onClose={() => { setShowApply(false); setEligibility(null); }} title="New Loan Application">
+          {error && <div style={{ background: '#fee2e2', color: '#991b1b', padding: '10px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px' }}>{error}</div>}
+          <form onSubmit={submitLoan}>
+            <Field label="Member">
+              <select name="memberId" value={form.memberId} onChange={handleChange} required style={input}>
+                <option value="">Select Member</option>
+                {members.map(m => <option key={m._id} value={m._id}>{m.firstName} {m.surname} ({m.memberNumber})</option>)}
+              </select>
+            </Field>
+            <Field label="Loan Type">
+              <select name="type" value={form.type} onChange={handleChange} required style={input}>
+                <option value="emergency">Emergency</option>
+                <option value="school_fees">School Fees</option>
+                <option value="business">Business</option>
+              </select>
+            </Field>
+
+            {eligibility && (
+              <div style={{
+                background: eligibility.eligible ? '#dcfce7' : '#fee2e2',
+                color: eligibility.eligible ? '#15803d' : '#991b1b',
+                padding: '12px', borderRadius: '10px', marginBottom: '14px', fontSize: '13px', fontWeight: '500'
+              }}>
+                {eligibility.eligible
+                  ? `✅ Eligible — Duration: ${eligibility.duration} month(s), Max: UGX ${eligibility.maxAmount?.toLocaleString()}`
+                  : `❌ ${eligibility.reason}`}
+              </div>
+            )}
+
+            <Field label="Amount (UGX)">
+              <input type="number" name="amount" value={form.amount} onChange={handleChange} required style={input} />
+            </Field>
+            <Field label="Duration (months)">
+              <input type="number" name="duration" value={form.duration} onChange={handleChange} required style={input} />
+            </Field>
+            <Field label="Repayment Schedule">
+              <select name="scheduleUnit" value={form.scheduleUnit} onChange={handleChange} style={input}>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </Field>
+            <Field label="Purpose">
+              <input type="text" name="purpose" value={form.purpose} onChange={handleChange} style={input} />
+            </Field>
+            <PrimaryBtn type="submit" disabled={!eligibility?.eligible}>Submit Loan</PrimaryBtn>
+          </form>
+        </Modal>
+      )}
+
+      {showSettings && settings && (
+        <Modal onClose={() => setShowSettings(false)} title="⚙️ Loan Settings">
+          <form onSubmit={saveSettings}>
+            <Field label="Loan Limit (% of savings)">
+              <input type="number" value={settings.loanLimitPercent || 0} onChange={e => setSettings({ ...settings, loanLimitPercent: parseFloat(e.target.value) })} style={input} />
+            </Field>
+            <Field label="Emergency Interest (%)">
+              <input type="number" value={settings.emergencyInterest || 0} onChange={e => setSettings({ ...settings, emergencyInterest: parseFloat(e.target.value) })} style={input} />
+            </Field>
+            <Field label="School Fees Interest (%)">
+              <input type="number" value={settings.schoolFeesInterest || 0} onChange={e => setSettings({ ...settings, schoolFeesInterest: parseFloat(e.target.value) })} style={input} />
+            </Field>
+            <Field label="Business Interest (%)">
+              <input type="number" value={settings.businessInterest || 0} onChange={e => setSettings({ ...settings, businessInterest: parseFloat(e.target.value) })} style={input} />
+            </Field>
+            <PrimaryBtn type="submit" style={{ background: '#22c55e' }}>Save Settings</PrimaryBtn>
+          </form>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ==================== HELPERS ====================
+const statusColor = (status) => {
+  const map = {
+    pending: { bg: '#fef9c3', text: '#854d0e' },
+    approved: { bg: '#dbeafe', text: '#1e40af' },
+    disbursed: { bg: '#c7d2fe', text: '#3730a3' },
+    active: { bg: '#d1fae5', text: '#065f46' },
+    closed: { bg: '#f1f5f9', text: '#475569' },
+    rejected: { bg: '#fee2e2', text: '#991b1b' },
+    writeOff: { bg: '#fecaca', text: '#7f1d1d' }
+  };
+  return map[status] || { bg: '#f3f4f6', text: '#374151' };
+};
+
+const SummaryCard = ({ title, value, color, bgGrad, icon }) => (
+  <div style={{ background: bgGrad, padding: '18px 20px', borderRadius: '12px', boxShadow: '0 2px 6px rgba(0,0,0,0.06)' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div>
+        <div style={{ fontSize: '14px', color, fontWeight: '500' }}>{title}</div>
+        <div style={{ fontSize: '30px', fontWeight: '700', color }}>{value}</div>
+      </div>
+      <span style={{ fontSize: '28px' }}>{icon}</span>
+    </div>
+  </div>
+);
+
+const GradientBtn = ({ children, onClick, gradient, shadow }) => (
+  <button onClick={onClick} style={{
+    padding: '10px 22px', background: gradient, color: '#fff', border: 'none',
+    borderRadius: '8px', fontSize: '15px', fontWeight: '600', cursor: 'pointer',
+    boxShadow: `0 4px 10px ${shadow}`, transition: 'transform 0.1s ease'
+  }}
+    onMouseOver={e => e.currentTarget.style.transform = 'scale(1.02)'}
+    onMouseOut={e => e.currentTarget.style.transform = 'scale(1)'}
+  >{children}</button>
+);
+
+const ActionBtn = ({ children, onClick, color }) => (
+  <button onClick={onClick} style={{ padding: '4px 12px', background: color, color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: '500' }}>{children}</button>
+);
+
+const PrimaryBtn = ({ children, type = 'button', disabled, style }) => (
+  <button type={type} disabled={disabled} style={{
+    padding: '12px 24px', background: disabled ? '#94a3b8' : '#2563eb',
+    color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600',
+    cursor: disabled ? 'not-allowed' : 'pointer', fontSize: '14px',
+    marginTop: '10px', width: '100%', ...style
+  }}>{children}</button>
+);
+
+const Modal = ({ children, onClose, title }) => (
+  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+    <div style={{ background: '#fff', padding: '30px', borderRadius: '16px', width: '520px', maxHeight: '90vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+        <h2 style={{ margin: 0, color: '#1e293b' }}>{title}</h2>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#64748b' }}>✕</button>
+      </div>
+      {children}
+    </div>
+  </div>
+);
+
+const Field = ({ label, children }) => (
+  <div style={{ marginBottom: '16px' }}>
+    <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500', color: '#334155', fontSize: '14px' }}>{label}</label>
+    {children}
+  </div>
+);
+
+const input = { width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', background: '#f9fafb' };
+const th = { padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#334155' };
+const td = { padding: '12px 16px' };
+ 
+=== SHARE SETTINGS === 
+'use client';
+import { useState, useEffect } from 'react';
+import axios from 'axios';
+
+export default function ShareSettings() {
+  const [settings, setSettings] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    fetchSettings();
+  }, []);
+
+  const fetchSettings = async () => {
+    try {
+      const response = await axios.get('http://localhost:5000/api/settings/shares');
+      setSettings(response.data);
+      setLoading(false);
+    } catch (err) {
+      setMessage('Failed to load settings.');
+      setLoading(false);
+    }
+  };
+
+  const handleChange = (type, field, value) => {
+    setSettings({
+      ...settings,
+      [type]: {
+        ...settings[type],
+        [field]: Number(value)
+      }
+    });
+  };
+
+  const handleSave = async () => {
+    try {
+      await axios.put('http://localhost:5000/api/settings/shares', settings);
+      setMessage('✅ Settings saved successfully!');
+    } catch (err) {
+      setMessage('❌ Failed to save settings.');
+    }
+  };
+
+  if (loading) return <div>Loading...</div>;
+
+  const shareTypes = ['ordinary', 'silver', 'golden', 'platinum'];
+  const labels = { ordinary: 'Ordinary', silver: 'Silver', golden: 'Golden', platinum: 'Platinum' };
+
+  return (
+    <div style={{ maxWidth: '800px', margin: '40px auto', padding: '20px', background: 'white', borderRadius: '12px', boxShadow: '0 2px 10px rgba(0,0,0,0.1)' }}>
+      <h2>⚙️ Share Settings</h2>
+      <p>Set the price and maximum shares per member for each share type.</p>
+
+      {message && <div style={{ padding: '10px', marginBottom: '15px', background: message.includes('✅') ? '#d4edda' : '#f8d7da', color: message.includes('✅') ? '#155724' : '#721c24', borderRadius: '6px' }}>{message}</div>}
+
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ background: '#0f3460', color: 'white' }}>
+            <th style={{ padding: '12px' }}>Share Type</th>
+            <th style={{ padding: '12px' }}>Price (UGX)</th>
+            <th style={{ padding: '12px' }}>Max Shares</th>
+          </tr>
+        </thead>
+        <tbody>
+          {shareTypes.map(type => (
+            <tr key={type} style={{ borderBottom: '1px solid #ddd' }}>
+              <td style={{ padding: '12px' }}><strong>{labels[type]}</strong></td>
+              <td style={{ padding: '12px' }}>
+                <input
+                  type="number"
+                  value={settings[type]?.price || 0}
+                  onChange={(e) => handleChange(type, 'price', e.target.value)}
+                  style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
+                />
+              </td>
+              <td style={{ padding: '12px' }}>
+                <input
+                  type="number"
+                  value={settings[type]?.max || 0}
+                  onChange={(e) => handleChange(type, 'max', e.target.value)}
+                  style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
+                />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <button onClick={handleSave} style={{ width: '100%', padding: '14px', marginTop: '20px', background: '#0f3460', color: 'white', border: 'none', borderRadius: '6px', fontSize: '16px', cursor: 'pointer' }}>
+        Save Settings
+      </button>
+
+      <br /><br />
+      <a href="/dashboard" style={{ color: '#0f3460', textDecoration: 'none' }}>← Back to Dashboard</a>
+    </div>
+  );
+} 
+=== MEMBERS === 
+'use client';
+import { useState, useEffect } from 'react';
+import axios from 'axios';
+
+export default function Members() {
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const fetchMembers = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/members');
+        setMembers(response.data);
+        setLoading(false);
+      } catch (err) {
+        setError('Failed to load members.');
+        setLoading(false);
+      }
+    };
+    fetchMembers();
+  }, []);
+
+  const handleDelete = async (memberNumber) => {
+    if (!confirm(`Are you sure you want to delete member ${memberNumber}?`)) return;
+    try {
+      await axios.delete(`http://localhost:5000/api/members/${memberNumber}`);
+      setMembers(members.filter(m => m.memberNumber !== memberNumber));
+      alert('Member deleted successfully!');
+    } catch (err) {
+      alert('Failed to delete member.');
+    }
+  };
+
+  if (loading) return <div style={{ padding: '40px', textAlign: 'center' }}>Loading members...</div>;
+  if (error) return <div style={{ padding: '40px', textAlign: 'center', color: 'red' }}>{error}</div>;
+
+  return (
+    <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1>👥 Members</h1>
+        <a href="/members/add" style={{
+          background: '#0f3460',
+          color: 'white',
+          padding: '10px 20px',
+          borderRadius: '6px',
+          textDecoration: 'none'
+        }}>
+          + Add Member
+        </a>
+      </div>
+
+      <div style={{ marginTop: '20px', overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ background: '#0f3460', color: 'white', textAlign: 'left' }}>
+              <th style={{ padding: '12px' }}>Member Number</th>
+              <th style={{ padding: '12px' }}>Name</th>
+              <th style={{ padding: '12px' }}>Email</th>
+              <th style={{ padding: '12px' }}>Phone</th>
+              <th style={{ padding: '12px' }}>Status</th>
+              <th style={{ padding: '12px' }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {members.map((member) => (
+              <tr key={member._id} style={{ borderBottom: '1px solid #ddd' }}>
+                <td style={{ padding: '12px' }}>{member.memberNumber}</td>
+                <td style={{ padding: '12px' }}>{member.fname || member.firstName} {member.lname || member.lastName}</td>
+                <td style={{ padding: '12px' }}>{member.email}</td>
+                <td style={{ padding: '12px' }}>{member.phoneNumber || member.phone}</td>
+                <td style={{ padding: '12px' }}>
+                  <span style={{
+                    padding: '4px 10px',
+                    borderRadius: '12px',
+                    background: member.status === 'Active' ? '#d4edda' :
+                              member.status === 'Suspended' ? '#f8d7da' :
+                              member.status === 'Inactive' ? '#fff3cd' : '#e2e3e5',
+                    color: member.status === 'Active' ? '#155724' :
+                           member.status === 'Suspended' ? '#721c24' :
+                           member.status === 'Inactive' ? '#856404' : '#383d41'
+                  }}>
+                    {member.status || 'Active'}
+                  </span>
+                </td>
+                <td style={{ padding: '12px' }}>
+                  <a href={`/members/edit/${member.memberNumber}`} style={{
+                    background: '#0f3460',
+                    color: 'white',
+                    padding: '5px 12px',
+                    borderRadius: '4px',
+                    textDecoration: 'none',
+                    fontSize: '12px',
+                    marginRight: '5px'
+                  }}>
+                    Edit
+                  </a>
+                  <button onClick={() => handleDelete(member.memberNumber)} style={{
+                    background: '#dc3545',
+                    color: 'white',
+                    padding: '5px 12px',
+                    borderRadius: '4px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '12px'
+                  }}>
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <br />
+      <a href="/dashboard" style={{ color: '#0f3460', textDecoration: 'none', fontWeight: 'bold' }}>← Back to Dashboard</a>
+    </div>
+  );
+} 
+=== MEMBER ADD === 
+'use client';
+import { useState } from 'react';
+import axios from 'axios';
+import { useRouter } from 'next/navigation';
+
+export default function AddMember() {
+  const router = useRouter();
+  const [formData, setFormData] = useState({
+    memberNumber: '',
+    fname: '',
+    lname: '',
+    email: '',
+    phoneNumber: '',
+    address: '',
+    occupation: '',
+    dateOfBirth: '',
+    idNumber: '',
+    photo: '',
+    ordinaryShares: 0,
+    ordinaryAmount: 0,
+    silverShares: 0,
+    silverAmount: 0,
+    goldenShares: 0,
+    goldenAmount: 0,
+    platinumShares: 0,
+    platinumAmount: 0,
+    password: '',
+    nextOfKinName: '',
+    nextOfKinPhone: '',
+    nextOfKinRelationship: ''
+  });
+
+  const [photoPreview, setPhotoPreview] = useState(null);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const totalShares = () => {
+    return (
+      (parseInt(formData.ordinaryShares) || 0) +
+      (parseInt(formData.silverShares) || 0) +
+      (parseInt(formData.goldenShares) || 0) +
+      (parseInt(formData.platinumShares) || 0)
+    );
+  };
+
+  const shareValue = (shares, amount) => {
+    return (parseInt(shares) || 0) * (parseInt(amount) || 0);
+  };
+
+  const totalValue = () => {
+    return (
+      shareValue(formData.ordinaryShares, formData.ordinaryAmount) +
+      shareValue(formData.silverShares, formData.silverAmount) +
+      shareValue(formData.goldenShares, formData.goldenAmount) +
+      shareValue(formData.platinumShares, formData.platinumAmount)
+    );
+  };
+
+  const generatePassword = () => {
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let password = '';
+    for (let i = 0; i < 8; i++) {
+      password += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setFormData({ ...formData, password: password });
+  };
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData({ ...formData, [name]: value });
+    setError('');
+    setSuccess('');
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        setFormData({ ...formData, photo: reader.result });
+        setPhotoPreview(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!formData.memberNumber || !formData.fname || !formData.lname) {
+      setError('Member Number, First Name, and Last Name are required.');
+      return;
+    }
+
+    if (totalShares() > 15) {
+      setError('Total shares cannot exceed 15.');
+      return;
+    }
+
+    try {
+      const memberData = {
+        memberNumber: formData.memberNumber,
+        fname: formData.fname,
+        lname: formData.lname,
+        email: formData.email || '',
+        phoneNumber: formData.phoneNumber || '',
+        address: formData.address || '',
+        occupation: formData.occupation || '',
+        dateOfBirth: formData.dateOfBirth || '',
+        idNumber: formData.idNumber || '',
+        photo: formData.photo || '',
+        shares: {
+          ordinary: { count: parseInt(formData.ordinaryShares) || 0, amount: parseInt(formData.ordinaryAmount) || 0 },
+          silver: { count: parseInt(formData.silverShares) || 0, amount: parseInt(formData.silverAmount) || 0 },
+          golden: { count: parseInt(formData.goldenShares) || 0, amount: parseInt(formData.goldenAmount) || 0 },
+          platinum: { count: parseInt(formData.platinumShares) || 0, amount: parseInt(formData.platinumAmount) || 0 }
+        },
+        totalShares: totalShares(),
+        totalValue: totalValue(),
+        password: formData.password || 'password123',
+        nextOfKinName: formData.nextOfKinName || '',
+        nextOfKinPhone: formData.nextOfKinPhone || '',
+        nextOfKinRelationship: formData.nextOfKinRelationship || '',
+        status: 'Active',
+        role: 'member'
+      };
+
+      await axios.post('http://localhost:5000/api/members', memberData);
+      setSuccess('Member created successfully!');
+      setTimeout(() => router.push('/members'), 2000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to create member.');
+    }
+  };
+
+  const inputStyle = {
+    width: '100%',
+    padding: '10px',
+    border: '1px solid #ddd',
+    borderRadius: '6px',
+    marginTop: '5px',
+    fontSize: '14px',
+    boxSizing: 'border-box'
+  };
+
+  return (
+    <div style={{ maxWidth: '900px', margin: '40px auto', padding: '20px', background: 'white', borderRadius: '12px', boxShadow: '0 2px 10px rgba(0,0,0,0.1)' }}>
+      <h2 style={{ color: '#0f3460' }}>Add New Member</h2>
+      <p style={{ color: '#666' }}>Fill in all details to register a new club member.</p>
+
+      {error && <div style={{ background: '#f8d7da', color: '#721c24', padding: '10px', borderRadius: '6px', marginBottom: '15px' }}>{error}</div>}
+      {success && <div style={{ background: '#d4edda', color: '#155724', padding: '10px', borderRadius: '6px', marginBottom: '15px' }}>{success}</div>}
+
+      <form onSubmit={handleSubmit}>
+        <h3 style={{ borderBottom: '1px solid #ddd', paddingBottom: '10px' }}>Basic Information</h3>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+          <div>
+            <label>Profile Photo</label>
+            <input type="file" onChange={handleFileChange} accept="image/*" style={inputStyle} />
+            {photoPreview && (
+              <div style={{ marginTop: '10px' }}>
+                <img src={photoPreview} alt="Preview" style={{ width: '80px', height: '80px', borderRadius: '50%', objectFit: 'cover' }} />
+              </div>
+            )}
+          </div>
+          <div>
+            <label>Member Number *</label>
+            <input type="text" name="memberNumber" value={formData.memberNumber} onChange={handleChange} placeholder="e.g., MEM001" style={inputStyle} required />
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+          <div>
+            <label>First Name *</label>
+            <input type="text" name="fname" value={formData.fname} onChange={handleChange} placeholder="First Name" style={inputStyle} required />
+          </div>
+          <div>
+            <label>Last Name *</label>
+            <input type="text" name="lname" value={formData.lname} onChange={handleChange} placeholder="Last Name" style={inputStyle} required />
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+          <div>
+            <label>Email</label>
+            <input type="email" name="email" value={formData.email} onChange={handleChange} placeholder="member@email.com" style={inputStyle} />
+          </div>
+          <div>
+            <label>Phone Number</label>
+            <input type="text" name="phoneNumber" value={formData.phoneNumber} onChange={handleChange} placeholder="e.g., 0712345678" style={inputStyle} />
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+          <div>
+            <label>Address</label>
+            <input type="text" name="address" value={formData.address} onChange={handleChange} placeholder="e.g., Kampala, Uganda" style={inputStyle} />
+          </div>
+          <div>
+            <label>Occupation</label>
+            <input type="text" name="occupation" value={formData.occupation} onChange={handleChange} placeholder="e.g., Teacher" style={inputStyle} />
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+          <div>
+            <label>Date of Birth</label>
+            <input type="date" name="dateOfBirth" value={formData.dateOfBirth} onChange={handleChange} style={inputStyle} />
+          </div>
+          <div>
+            <label>ID Number</label>
+            <input type="text" name="idNumber" value={formData.idNumber} onChange={handleChange} placeholder="e.g., 1234567890" style={inputStyle} />
+          </div>
+        </div>
+
+        {/* PASSWORD FIELD WITH GENERATE BUTTON */}
+        <div style={{ marginTop: '15px' }}>
+          <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Password</label>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <input
+              type="text"
+              name="password"
+              value={formData.password}
+              onChange={handleChange}
+              placeholder="e.g., password123"
+              style={{ ...inputStyle, flex: 1 }}
+            />
+            <button
+              type="button"
+              onClick={generatePassword}
+              style={{
+                padding: '10px 20px',
+                background: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                whiteSpace: 'nowrap',
+                marginTop: '5px'
+              }}
+            >
+              Generate
+            </button>
+          </div>
+          <p style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>Click "Generate" to create a random password, or type your own.</p>
+        </div>
+
+        <h3 style={{ borderBottom: '1px solid #ddd', paddingBottom: '10px', marginTop: '20px' }}>Share Information</h3>
+        <p style={{ color: '#666', fontSize: '14px' }}>Enter number of shares and amount per share for each type. Total shares cannot exceed 15.</p>
+
+        <div style={{ background: '#f8f9fa', padding: '15px', borderRadius: '6px', marginBottom: '15px' }}>
+          <h4>Ordinary Shares</h4>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px' }}>
+            <div>
+              <label>Number of Shares</label>
+              <input type="number" name="ordinaryShares" value={formData.ordinaryShares} onChange={handleChange} min="0" max="15" style={inputStyle} />
+            </div>
+            <div>
+              <label>Amount per Share (UGX)</label>
+              <input type="number" name="ordinaryAmount" value={formData.ordinaryAmount} onChange={handleChange} min="0" placeholder="e.g., 100000" style={inputStyle} />
+            </div>
+            <div>
+              <label>Value</label>
+              <p style={{ fontWeight: 'bold', color: '#0f3460' }}>UGX {shareValue(formData.ordinaryShares, formData.ordinaryAmount).toLocaleString()}</p>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ background: '#f8f9fa', padding: '15px', borderRadius: '6px', marginBottom: '15px' }}>
+          <h4>Silver Shares</h4>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px' }}>
+            <div>
+              <label>Number of Shares</label>
+              <input type="number" name="silverShares" value={formData.silverShares} onChange={handleChange} min="0" max="15" style={inputStyle} />
+            </div>
+            <div>
+              <label>Amount per Share (UGX)</label>
+              <input type="number" name="silverAmount" value={formData.silverAmount} onChange={handleChange} min="0" placeholder="e.g., 200000" style={inputStyle} />
+            </div>
+            <div>
+              <label>Value</label>
+              <p style={{ fontWeight: 'bold', color: '#0f3460' }}>UGX {shareValue(formData.silverShares, formData.silverAmount).toLocaleString()}</p>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ background: '#f8f9fa', padding: '15px', borderRadius: '6px', marginBottom: '15px' }}>
+          <h4>Golden Shares</h4>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px' }}>
+            <div>
+              <label>Number of Shares</label>
+              <input type="number" name="goldenShares" value={formData.goldenShares} onChange={handleChange} min="0" max="15" style={inputStyle} />
+            </div>
+            <div>
+              <label>Amount per Share (UGX)</label>
+              <input type="number" name="goldenAmount" value={formData.goldenAmount} onChange={handleChange} min="0" placeholder="e.g., 500000" style={inputStyle} />
+            </div>
+            <div>
+              <label>Value</label>
+              <p style={{ fontWeight: 'bold', color: '#0f3460' }}>UGX {shareValue(formData.goldenShares, formData.goldenAmount).toLocaleString()}</p>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ background: '#f8f9fa', padding: '15px', borderRadius: '6px', marginBottom: '15px' }}>
+          <h4>Platinum Shares</h4>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px' }}>
+            <div>
+              <label>Number of Shares</label>
+              <input type="number" name="platinumShares" value={formData.platinumShares} onChange={handleChange} min="0" max="15" style={inputStyle} />
+            </div>
+            <div>
+              <label>Amount per Share (UGX)</label>
+              <input type="number" name="platinumAmount" value={formData.platinumAmount} onChange={handleChange} min="0" placeholder="e.g., 1000000" style={inputStyle} />
+            </div>
+            <div>
+              <label>Value</label>
+              <p style={{ fontWeight: 'bold', color: '#0f3460' }}>UGX {shareValue(formData.platinumShares, formData.platinumAmount).toLocaleString()}</p>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ background: '#0f3460', color: 'white', padding: '15px', borderRadius: '6px', marginTop: '15px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+            <div>
+              <strong>Total Shares:</strong> {totalShares()} / 15
+            </div>
+            <div>
+              <strong>Total Value:</strong> UGX {totalValue().toLocaleString()}
+            </div>
+          </div>
+          {totalShares() > 15 && <p style={{ color: '#ff6b6b', marginTop: '5px' }}>⚠️ Total shares cannot exceed 15!</p>}
+        </div>
+
+        <h3 style={{ borderBottom: '1px solid #ddd', paddingBottom: '10px', marginTop: '20px' }}>Next of Kin</h3>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px' }}>
+          <div>
+            <label>Full Name</label>
+            <input type="text" name="nextOfKinName" value={formData.nextOfKinName} onChange={handleChange} placeholder="Next of Kin Full Name" style={inputStyle} />
+          </div>
+          <div>
+            <label>Phone Number</label>
+            <input type="text" name="nextOfKinPhone" value={formData.nextOfKinPhone} onChange={handleChange} placeholder="e.g., 0712345678" style={inputStyle} />
+          </div>
+          <div>
+            <label>Relationship</label>
+            <input type="text" name="nextOfKinRelationship" value={formData.nextOfKinRelationship} onChange={handleChange} placeholder="e.g., Spouse, Parent" style={inputStyle} />
+          </div>
+        </div>
+
+        <button type="submit" style={{ width: '100%', padding: '14px', background: '#0f3460', color: 'white', border: 'none', borderRadius: '6px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer', marginTop: '20px' }}>
+          Create Member
+        </button>
+      </form>
+    </div>
+  );
+} 
+=== DASHBOARD === 
+'use client';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+
+export default function Dashboard() {
+  const router = useRouter();
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      const parsedUser = JSON.parse(storedUser);
+      setUser(parsedUser);
+    } else {
+      router.push('/');
+    }
+  }, [router]);
+
+  const handleLogout = () => {
+    localStorage.removeItem('user');
+    router.push('/');
+  };
+
+  if (!user) {
+    return <div>Loading...</div>;
+  }
+
+  const isAdmin = user.role === 'admin';
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#f0f2f5', padding: '20px' }}>
+      <div style={{ maxWidth: '1200px', margin: '0 auto', background: 'white', padding: '30px', borderRadius: '12px', boxShadow: '0 2px 10px rgba(0,0,0,0.1)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eee', paddingBottom: '15px' }}>
+          <div>
+            <h1 style={{ color: '#0f3460', margin: 0 }}>CRESTED SS</h1>
+            <h2 style={{ color: '#0f3460', margin: 0, fontSize: '18px' }}>INVESTMENT CLUB LTD</h2>
+          </div>
+          <button onClick={handleLogout} style={{ padding: '10px 20px', background: '#dc3545', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>
+            Logout
+          </button>
+        </div>
+
+        <div style={{ marginTop: '20px' }}>
+          <h2>Welcome, {user.fname || user.memberNumber}!</h2>
+          <p><strong>Member Number:</strong> {user.memberNumber}</p>
+          <p><strong>Role:</strong> {user.role}</p>
+        </div>
+
+        {isAdmin ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px', marginTop: '30px' }}>
+            <a href="/members" style={{ textDecoration: 'none', color: 'inherit' }}>
+              <div style={{ background: '#e3f2fd', padding: '20px', borderRadius: '8px', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.1)' }}>
+                <h3>👥 Members</h3>
+                <p>Manage member accounts</p>
+              </div>
+            </a>
+            <a href="/savings" style={{ textDecoration: 'none', color: 'inherit' }}>
+              <div style={{ background: '#e8f5e9', padding: '20px', borderRadius: '8px', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.1)' }}>
+                <h3>💰 Savings</h3>
+                <p>Track member savings</p>
+              </div>
+            </a>
+            <a href="/admin/loans" style={{ textDecoration: 'none', color: 'inherit' }}>
+  <div style={{ background: '#fff3e0', padding: '20px', borderRadius: '8px', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.1)' }}>
+    <h3>🏦 Loans</h3>
+    <p>Manage loan applications</p>
+  </div>
+</a>
+            <a href="/reports" style={{ textDecoration: 'none', color: 'inherit' }}>
+              <div style={{ background: '#fce4ec', padding: '20px', borderRadius: '8px', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.1)' }}>
+                <h3>📊 Reports</h3>
+                <p>Generate financial reports</p>
+              </div>
+            </a>
+            <a href="/business" style={{ textDecoration: 'none', color: 'inherit' }}>
+              <div style={{ background: '#e8f5e9', padding: '20px', borderRadius: '8px', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.1)' }}>
+                <h3>🏢 Business</h3>
+                <p>Manage business investments</p>
+              </div>
+            </a>
+            <a href="/admin/share-settings" style={{ textDecoration: 'none', color: 'inherit' }}>
+              <div style={{ background: '#fff3e0', padding: '20px', borderRadius: '8px', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.1)' }}>
+                <h3>⚙️ Share Settings</h3>
+                <p>Manage share prices and limits</p>
+              </div>
+            </a>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: '30px' }}>
+            <a href={`/profile/${user.memberNumber}`} style={{ textDecoration: 'none', color: 'inherit', width: '100%', maxWidth: '400px' }}>
+              <div style={{ background: '#0f3460', color: 'white', padding: '30px', borderRadius: '12px', cursor: 'pointer', boxShadow: '0 2px 10px rgba(0,0,0,0.2)', textAlign: 'center' }}>
+                <h2 style={{ margin: 0 }}>👤 My Profile</h2>
+                <p style={{ margin: '5px 0 0 0', color: '#ccc' }}>View all your details, savings, shares, and loans</p>
+              </div>
+            </a>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+} 
+=== LOGIN === 

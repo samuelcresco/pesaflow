@@ -13,9 +13,13 @@
     "test:watch": "jest --watch"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "axios": "^1.19.0",
+    "expo": "^57.0.15",
     "next": "15.3.4",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "recharts": "^3.10.1"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

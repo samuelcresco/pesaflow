@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "9a840567-de90-4aed-8e31-9c984e4d3086"
+      }
+    },
+    "android": {
+      "package": "com.batebate.pesaflowfrontend"
+    }
+  }
+}

@@ -1,0 +1,5379 @@
+=== APP.JS === 
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const morgan = require('morgan');
+const helmet = require('helmet');
+const mongoose = require('mongoose');
+
+// Connect to MongoDB
+mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/pesaflow')
+  .then(() => console.log('✅ MongoDB Connected'))
+  .catch(err => console.error('❌ MongoDB Error:', err.message));
+
+const app = express();
+const PORT = process.env.PORT || 5000;
+
+// Middleware
+app.use(helmet());
+app.use(cors());
+app.use(morgan('dev'));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// ==================== ROUTES ====================
+const membersRoutes = require('./routes/members.routes');
+app.use('/api/members', membersRoutes);
+const adminRoutes = require('./routes/admin.routes');
+app.use('/api/admin', adminRoutes);
+const savingsRoutes = require('./routes/savings.routes');
+app.use('/api/savings', savingsRoutes);
+const settingsRoutes = require('./routes/settings.routes');
+app.use('/api/settings', settingsRoutes);
+const loansRoutes = require('./routes/loans.routes');
+app.use('/api/loans', loansRoutes);
+
+// Health check
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'OK', message: 'PesaFlow backend running' });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ error: 'Route not found' });
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ error: 'Something went wrong!' });
+});
+
+app.listen(PORT, () => {
+  console.log(`✅ Server running at http://localhost:${PORT}`);
+});
+ 
+=== MODELS === 
+const mongoose = require('mongoose');
+
+const accountSchema = new mongoose.Schema({
+  memberNumber: {
+    type: String,
+    required: [true, 'Member number is required'],
+    unique: true,  // This creates an index automatically
+    trim: true,
+    uppercase: true,
+    ref: 'User'
+  },
+  savings: {
+    type: Number,
+    default: 0,
+    min: [0, 'Savings cannot be negative'],
+    set: function(value) {
+      return Math.round(value * 100) / 100; // Round to 2 decimal places
+    }
+  },
+  monthlyContribution: {
+    type: Number,
+    default: 0,
+    min: [0, 'Monthly contribution cannot be negative'],
+    set: function(value) {
+      return Math.round(value * 100) / 100;
+    }
+  },
+  sharesOwned: {
+    type: Number,
+    default: 0,
+    min: [0, 'Shares owned cannot be negative'],
+    set: function(value) {
+      return Math.round(value * 100) / 100;
+    }
+  },
+  accountStatus: {
+    type: String,
+    enum: {
+      values: ['pending', 'active', 'suspended', 'closed'],
+      message: '{VALUE} is not a valid account status'
+    },
+    default: 'pending',
+    lowercase: true,
+    index: true
+  },
+  lastTransactionDate: {
+    type: Date
+  },
+  accountOpenDate: {
+    type: Date,
+    default: Date.now
+  },
+  notes: {
+    type: String,
+    maxlength: [500, 'Notes cannot exceed 500 characters']
+  }
+}, {
+  timestamps: true
+});
+
+// Pre-save middleware
+accountSchema.pre('save', function(next) {
+  if (this.memberNumber) {
+    this.memberNumber = this.memberNumber.toUpperCase();
+  }
+  next();
+});
+
+// Instance method to update balance
+accountSchema.methods.updateBalance = function(amount, type) {
+  if (type === 'credit') {
+    this.savings += amount;
+  } else if (type === 'debit' && this.savings >= amount) {
+    this.savings -= amount;
+  } else {
+    throw new Error('Insufficient funds');
+  }
+  this.lastTransactionDate = new Date();
+  return this.save();
+};
+
+module.exports = mongoose.model('Account', accountSchema);
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+
+const AdminSchema = new mongoose.Schema({
+  username: { type: String, required: true, unique: true },
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  role: { type: String, default: 'admin' }
+}, { timestamps: true });
+
+AdminSchema.pre('save', async function(next) {
+  if (!this.isModified('password')) return next();
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+  next();
+});
+
+AdminSchema.methods.comparePassword = async function(enteredPassword) {
+  return await bcrypt.compare(enteredPassword, this.password);
+};
+
+module.exports = mongoose.model('Admin', AdminSchema);const mongoose = require('mongoose');
+
+const BusinessSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  description: String,
+  capital: { type: Number, default: 0 },
+  status: { 
+    type: String, 
+    enum: ['active', 'closed'], 
+    default: 'active' 
+  },
+  totalProfit: { type: Number, default: 0 },
+  totalLoss: { type: Number, default: 0 },
+  transactions: [{
+    type: { 
+      type: String, 
+      enum: ['capital_invested', 'profit', 'loss', 'capital_returned', 'loan_disbursed', 'loan_repaid'],
+      required: true
+    },
+    amount: { type: Number, required: true },
+    description: String,
+    date: { type: Date, default: Date.now }
+  }],
+  clubCapitalId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClubCapital' }
+}, { timestamps: true });
+
+module.exports = mongoose.model('Business', BusinessSchema);
+const mongoose = require('mongoose');
+
+const ClubCapitalSchema = new mongoose.Schema({
+  balance: { type: Number, default: 0 },
+  transactions: [{
+    type: String,
+    amount: Number,
+    description: String,
+    date: { type: Date, default: Date.now }
+  }]
+}, { timestamps: true });
+
+module.exports = mongoose.model('ClubCapital', ClubCapitalSchema);
+const mongoose = require('mongoose');
+
+const ClubSettingSchema = new mongoose.Schema({
+  year: { type: Number, required: true, unique: true },
+  agreedMonthlyAmount: { type: Number, default: 0 },
+  membershipFee: { type: Number, default: 0 }
+}, { timestamps: true });
+
+module.exports = mongoose.model('ClubSetting', ClubSettingSchema);const mongoose = require('mongoose');
+
+const DividendSchema = new mongoose.Schema({
+  businessId: { type: mongoose.Schema.Types.ObjectId, ref: 'Business', required: true },
+  totalProfit: { type: Number, required: true },
+  
+  // Breakdown by share type
+  platinumAmount: { type: Number, required: true },
+  goldenAmount: { type: Number, required: true },
+  silverAmount: { type: Number, required: true },
+  bronzeAmount: { type: Number, required: true },
+  
+  platinumPercent: { type: Number, required: true },
+  goldenPercent: { type: Number, required: true },
+  silverPercent: { type: Number, required: true },
+  bronzePercent: { type: Number, required: true },
+  
+  // Per member distribution
+  distributions: [{
+    memberId: { type: mongoose.Schema.Types.ObjectId, ref: 'Member' },
+    memberName: String,
+    platinumShares: Number,
+    goldenShares: Number,
+    silverShares: Number,
+    bronzeShares: Number,
+    platinumAmount: Number,
+    goldenAmount: Number,
+    silverAmount: Number,
+    bronzeAmount: Number,
+    totalAmount: Number
+  }],
+  
+  distributedDate: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+module.exports = mongoose.model('Dividend', DividendSchema);const mongoose = require('mongoose');
+
+const InvestmentSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  type: { type: String, enum: ['land', 'asset'], required: true },
+  purchasePrice: { type: Number, required: true },
+  salePrice: { type: Number, default: 0 },
+  purchaseDate: { type: Date, default: Date.now },
+  saleDate: Date,
+  totalMembers: { type: Number, required: true },
+  members: [{
+    memberId: { type: mongoose.Schema.Types.ObjectId, ref: 'Member' },
+    amountDeducted: { type: Number, required: true },
+    amountAdded: { type: Number, default: 0 }
+  }],
+  status: { type: String, enum: ['owned', 'sold'], default: 'owned' },
+  description: String
+}, { timestamps: true });
+
+module.exports = mongoose.model('Investment', InvestmentSchema);const mongoose = require('mongoose');
+
+const LoanSchema = new mongoose.Schema({
+  memberId: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'Member', 
+    required: true 
+  },
+  type: { 
+    type: String, 
+    enum: ['emergency', 'school_fees', 'business'], 
+    required: true 
+  },
+  amount: { type: Number, required: true, min: 0 },
+  interestRate: { type: Number, required: true }, // e.g., 5 for 5%
+  durationMonths: { type: Number, required: true }, // 1, 2, 4, 6, 9, 12
+  totalRepayable: { type: Number, required: true },
+  status: { 
+    type: String, 
+    enum: ['pending', 'approved', 'disbursed', 'active', 'closed', 'rejected', 'writeOff'], 
+    default: 'pending' 
+  },
+  appliedBy: { 
+    type: String, 
+    enum: ['member', 'admin'], 
+    default: 'member' 
+  },
+  appliedDate: { type: Date, default: Date.now },
+  approvedDate: Date,
+  disbursedDate: Date,
+  activeDate: Date,
+  closedDate: Date,
+  purpose: String,
+  rejectionReason: String
+}, { timestamps: true });
+
+module.exports = mongoose.model('Loan', LoanSchema);const mongoose = require('mongoose');
+
+const LoanSettingsSchema = new mongoose.Schema({
+  loanLimitPercentage: { type: Number, default: 70 },
+  interestRates: {
+    emergency: { type: Number, default: 5 },
+    school_fees: { type: Number, default: 8 },
+    business: { type: Number, default: 10 }
+  },
+  eligibilityRules: {
+    emergency: { type: String, default: 'Active member with 4 Golden shares' },
+    school_fees: { type: String, default: 'Active member with 1 Platinum share' },
+    business: { type: String, default: 'Active member with 1 Platinum and 1 Silver share' }
+  },
+  updatedBy: { type: String },
+  updatedAt: { type: Date, default: Date.now }
+});
+
+module.exports = mongoose.model('LoanSettings', LoanSettingsSchema);const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+
+const MemberSchema = new mongoose.Schema({
+  firstName: { type: String, required: true },
+  surname: { type: String, required: true },
+  occupation: { type: String },
+  contact: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  address: { type: String, required: true },
+  photo: { type: String, default: '' },
+  memberNumber: { type: String, required: true, unique: true },
+  dateOfBirth: { type: Date, required: true },
+  dateOfSubscription: { type: Date, default: Date.now },
+  password: { type: String, required: true },
+  shares: {
+    golden: { type: Number, default: 0 },
+    platinum: { type: Number, default: 0 },
+    silver: { type: Number, default: 0 },
+    bronze: { type: Number, default: 0 }
+  },
+  nextOfKin: {
+    fullName: { type: String, required: true },
+    relationship: { type: String, required: true },
+    contact: { type: String, required: true },
+    email: { type: String },
+    address: { type: String, required: true },
+    photo: { type: String, default: '' }
+  },
+  active: { type: Boolean, default: true }
+}, { timestamps: true });
+
+// Hash password
+MemberSchema.pre('save', async function(next) {
+  if (!this.isModified('password')) return next();
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+  next();
+});
+
+// Compare password
+MemberSchema.methods.comparePassword = async function(enteredPassword) {
+  return await bcrypt.compare(enteredPassword, this.password);
+};
+
+// Total shares virtual
+MemberSchema.virtual('totalShares').get(function() {
+  return this.shares.golden + this.shares.platinum + this.shares.silver + this.shares.bronze;
+});
+
+// Max shares validation
+MemberSchema.pre('save', function(next) {
+  const total = this.shares.golden + this.shares.platinum + this.shares.silver + this.shares.bronze;
+  if (total > 15) throw new Error('Total shares cannot exceed 15');
+  next();
+});
+
+module.exports = mongoose.model('Member', MemberSchema);
+const mongoose = require('mongoose');
+
+const RepaymentSchema = new mongoose.Schema({
+  loanId: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'Loan', 
+    required: true 
+  },
+  installmentNumber: { type: Number, required: true },
+  dueDate: { type: Date, required: true },
+  amountDue: { type: Number, required: true },
+  amountPaid: { type: Number, default: 0 },
+  status: { 
+    type: String, 
+    enum: ['pending', 'paid', 'overdue'], 
+    default: 'pending' 
+  },
+  paidDate: Date
+}, { timestamps: true });
+
+module.exports = mongoose.model('Repayment', RepaymentSchema);const mongoose = require('mongoose');
+
+const SavingSchema = new mongoose.Schema({
+  memberId: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'Member', 
+    default: null
+  },
+  category: {
+    type: String,
+    enum: ['monthly', 'extra', 'misc', 'donation', 'penalty', 'business_profit', 'shares', 'membership'],
+    required: true
+  },
+  amount: { type: Number, required: true, min: 0 },
+  description: { type: String, default: '' },
+  month: { type: String }, // e.g., "January 2026" for monthly savings
+  shareType: { type: String }, // for shares: golden/platinum/silver/bronze
+  shareQuantity: { type: Number, default: 0 },
+  date: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+module.exports = mongoose.model('Saving', SavingSchema);
+module.exports = {}; 
+const mongoose = require('mongoose');
+
+const SavingsSchema = new mongoose.Schema({
+  memberNumber: {
+    type: String,
+    required: true,
+    ref: 'User'
+  },
+  memberName: {
+    type: String,
+    required: true
+  },
+  year: {
+    type: Number,
+    required: true
+  },
+  month: {
+    type: Number,
+    required: true
+  },
+  amount: {
+    type: Number,
+    required: true
+  },
+  miscDeduction: {
+    type: Number,
+    default: 5000
+  },
+  netAmount: {
+    type: Number,
+    required: true
+  },
+  description: {
+    type: String,
+    default: ''
+  },
+  type: {
+    type: String,
+    enum: ['savings', 'asset_purchase', 'asset_sale', 'expense', 'penalty', 'membership_fee', 'shares_bought'],
+    default: 'savings'
+  },
+  recordedBy: {
+    type: String,
+    default: 'admin'
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+module.exports = mongoose.model('Savings', SavingsSchema);const mongoose = require('mongoose');
+
+const SettingSchema = new mongoose.Schema({
+  // Loan Settings
+  loanLimitPercent: { type: Number, default: 70 },
+  
+  // Interest Rates
+  emergencyInterest: { type: Number, default: 5 },
+  schoolFeesInterest: { type: Number, default: 8 },
+  businessInterest: { type: Number, default: 10 },
+  
+  // Duration Defaults
+  emergencyDurationMonths: { type: Number, default: 1 },
+  schoolFeesDefaultMonths: { type: Number, default: 3 },
+  businessDefaultMonths: { type: Number, default: 6 },
+  
+  // Dividend Percentages (Set by Admin)
+  dividendPlatinumPercent: { type: Number, default: 40 },
+  dividendGoldenPercent: { type: Number, default: 30 },
+  dividendSilverPercent: { type: Number, default: 20 },
+  dividendBronzePercent: { type: Number, default: 10 },
+  
+  // Monthly Savings
+  monthlySavingsAmount: { type: Number, default: 0 },
+  membershipFeeAmount: { type: Number, default: 0 }
+}, { timestamps: true });
+
+module.exports = mongoose.model('Setting', SettingSchema);
+const mongoose = require('mongoose');
+
+const SettingsSchema = new mongoose.Schema({
+  shareTypes: {
+    ordinary: { price: { type: Number, default: 100000 }, max: { type: Number, default: 15 } },
+    silver: { price: { type: Number, default: 250000 }, max: { type: Number, default: 10 } },
+    golden: { price: { type: Number, default: 500000 }, max: { type: Number, default: 5 } },
+    platinum: { price: { type: Number, default: 1000000 }, max: { type: Number, default: 3 } }
+  },
+  loanSettings: {
+    emergencyInterest: { type: Number, default: 10 },
+    businessInterest: { type: Number, default: 0.1666 },
+    schoolFeesInterest: { type: Number, default: 0.222 },
+    loanLimitPercent: { type: Number, default: 70 }
+  }
+});
+
+module.exports = mongoose.model('Settings', SettingsSchema);const mongoose = require('mongoose');
+
+const ShareSettingsSchema = new mongoose.Schema({
+  shareTypes: {
+    type: Object,
+    default: {
+      ordinary: { name: 'Ordinary', price: 100000, maxShares: 15, active: true },
+      silver: { name: 'Silver', price: 250000, maxShares: 10, active: true },
+      golden: { name: 'Golden', price: 500000, maxShares: 5, active: true },
+      platinum: { name: 'Platinum', price: 1000000, maxShares: 3, active: true }
+    }
+  },
+  updatedBy: { type: String, default: '' },
+  updatedAt: { type: Date, default: Date.now }
+});
+
+module.exports = mongoose.model('ShareSettings', ShareSettingsSchema);const mongoose = require('mongoose');
+
+const transactionSchema = new mongoose.Schema({
+  transactionId: {
+    type: String,
+    required: [true, 'Transaction ID is required'],
+    unique: true, 
+    trim: true,
+    uppercase: true
+  },
+  memberNumber: {
+    type: String,
+    required: [true, 'Member number is required'],
+    trim: true,
+    uppercase: true,
+    ref: 'User',
+    index: true 
+  },
+  date: {
+    type: Date,
+    default: Date.now,
+    required: true,
+    index: true 
+  },
+  type: {
+    type: String,
+    required: [true, 'Transaction type is required'],
+    enum: {
+      values: ['deposit', 'withdrawal', 'contribution', 'share_purchase', 'loan_payment', 'dividend', 'fee', 'transfer'],
+      message: '{VALUE} is not a valid transaction type'
+    },
+    lowercase: true,
+    index: true
+  },
+  amount: {
+    type: Number,
+    required: [true, 'Amount is required'],
+    min: [0.01, 'Amount must be greater than 0'],
+    set: function(value) {
+      return Math.round(value * 100) / 100; // Round to 2 decimal places
+    }
+  },
+  status: {
+    type: String,
+    enum: {
+      values: ['pending', 'completed', 'failed', 'cancelled', 'processing'],
+      message: '{VALUE} is not a valid transaction status'
+    },
+    default: 'pending',
+    lowercase: true,
+    index: true 
+  },
+  accountBalance: {
+    type: Number,
+    default: 0,
+    set: function(value) {
+      return Math.round(value * 100) / 100;
+    }
+  },
+  confirmedBy: {
+    type: String,
+    trim: true
+  },
+  description: {
+    type: String,
+    maxlength: [200, 'Description cannot exceed 200 characters'],
+    trim: true
+  },
+  reference: {
+    type: String,
+    trim: true
+  },
+  category: {
+    type: String,
+    enum: ['savings', 'shares', 'loan', 'fee', 'other'],
+    default: 'savings',
+    lowercase: true
+  }
+}, {
+  timestamps: true
+});
+
+// Pre-save middleware
+transactionSchema.pre('save', function(next) {
+  if (this.transactionId) {
+    this.transactionId = this.transactionId.toUpperCase();
+  }
+  if (this.memberNumber) {
+    this.memberNumber = this.memberNumber.toUpperCase();
+  }
+  next();
+});
+
+// Static method to generate transaction ID
+transactionSchema.statics.generateTransactionId = function() {
+  const timestamp = Date.now().toString();
+  const random = Math.random().toString(36).substr(2, 5).toUpperCase();
+  return `TXN${timestamp}${random}`;
+};
+
+// Instance method to complete transaction
+transactionSchema.methods.complete = function(confirmedBy) {
+  this.status = 'completed';
+  this.confirmedBy = confirmedBy;
+  return this.save();
+};
+
+module.exports = mongoose.model('Transaction', transactionSchema);
+module.exports = {}; 
+const mongoose = require('mongoose');
+
+const UserSchema = new mongoose.Schema({
+  memberNumber: { type: String, required: true, unique: true },
+  fname: { type: String, required: true },
+  lname: { type: String, required: true },
+  email: { type: String, default: '' },
+  phoneNumber: { type: String, required: true },
+  address: { type: String, default: '' },
+  occupation: { type: String, default: '' },
+  dateOfBirth: { type: String, default: '' },
+  idNumber: { type: String, default: '' },
+  photo: { type: String, default: '' },
+  password: { type: String, required: true },
+  role: { type: String, enum: ['admin', 'member'], default: 'member' },
+  status: { type: String, enum: ['Active', 'Suspended', 'Inactive', 'Terminated'], default: 'Active' },
+  savings: { type: Array, default: [] },
+  miscellaneous: { type: Array, default: [] },
+  penalties: { type: Array, default: [] },
+  shares: {
+    ordinary: { count: { type: Number, default: 0 }, amount: { type: Number, default: 0 } },
+    silver: { count: { type: Number, default: 0 }, amount: { type: Number, default: 0 } },
+    golden: { count: { type: Number, default: 0 }, amount: { type: Number, default: 0 } },
+    platinum: { count: { type: Number, default: 0 }, amount: { type: Number, default: 0 } }
+  },
+  totalShares: { type: Number, default: 0 },
+  totalValue: { type: Number, default: 0 },
+  membershipFee: { type: Number, default: 0 },
+  sharesTransactions: { type: Array, default: [] },
+  membershipFeeTransactions: { type: Array, default: [] },
+  assetTransactions: { type: Array, default: [] },
+  donations: { type: Array, default: [] },
+  businessProfits: { type: Array, default: [] },
+  businessInvestments: { type: Array, default: [] },
+  loans: { type: Array, default: [] },
+  agreedSavings: { type: Object, default: {} },
+  nextOfKinName: { type: String, default: '' },
+  nextOfKinPhone: { type: String, default: '' },
+  nextOfKinRelationship: { type: String, default: '' },
+  dateJoined: { type: Date, default: Date.now },
+  isVerified: { type: Boolean, default: false }
+});
+
+module.exports = mongoose.model('User', UserSchema); 
+=== CONTROLLERS === 
+module.exports = {}; 
+const Business = require('../models/Business');
+const ClubCapital = require('../models/ClubCapital');
+const Dividend = require('../models/Dividend');
+const Member = require('../models/Member');
+const Setting = require('../models/Setting');
+
+exports.createBusiness = async (req, res) => {
+  try {
+    const { name, description, capital } = req.body;
+    
+    // Check club capital
+    const clubCapital = await ClubCapital.findOne();
+    if (!clubCapital || clubCapital.balance < capital) {
+      return res.status(400).json({ error: 'Insufficient club capital' });
+    }
+
+    // Deduct from club capital
+    clubCapital.balance -= capital;
+    clubCapital.transactions.push({
+      type: 'capital_to_business',
+      amount: capital,
+      description: `Capital invested in business: ${name}`,
+      date: new Date()
+    });
+    await clubCapital.save();
+
+    const business = new Business({
+      name,
+      description,
+      capital,
+      status: 'active',
+      clubCapitalId: clubCapital._id,
+      transactions: [{
+        type: 'capital_invested',
+        amount: capital,
+        description: 'Initial capital investment',
+        date: new Date()
+      }]
+    });
+    await business.save();
+
+    res.status(201).json({ success: true, business });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+exports.getBusinesses = async (req, res) => {
+  try {
+    const businesses = await Business.find().sort('-createdAt');
+    res.json(businesses);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+exports.getBusiness = async (req, res) => {
+  try {
+    const business = await Business.findById(req.params.id);
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    res.json(business);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+exports.addProfit = async (req, res) => {
+  try {
+    const { amount, description } = req.body;
+    const business = await Business.findById(req.params.id);
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.status === 'closed') return res.status(400).json({ error: 'Business is closed' });
+
+    business.totalProfit += amount;
+    business.transactions.push({
+      type: 'profit',
+      amount,
+      description: description || 'Business profit',
+      date: new Date()
+    });
+    await business.save();
+
+    // Send profit to club capital
+    const clubCapital = await ClubCapital.findById(business.clubCapitalId);
+    if (clubCapital) {
+      clubCapital.balance += amount;
+      clubCapital.transactions.push({
+        type: 'business_profit',
+        amount,
+        description: `Profit from business: ${business.name}`,
+        businessId: business._id,
+        date: new Date()
+      });
+      await clubCapital.save();
+    }
+
+    res.json({ success: true, business });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+exports.recordLoss = async (req, res) => {
+  try {
+    const { amount, description } = req.body;
+    const business = await Business.findById(req.params.id);
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.status === 'closed') return res.status(400).json({ error: 'Business is closed' });
+
+    if (amount > business.capital) {
+      return res.status(400).json({ error: 'Loss cannot exceed business capital' });
+    }
+
+    business.totalLoss += amount;
+    business.capital -= amount;
+    business.transactions.push({
+      type: 'loss',
+      amount,
+      description: description || 'Business loss',
+      date: new Date()
+    });
+    await business.save();
+
+    res.json({ success: true, business });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+exports.closeBusiness = async (req, res) => {
+  try {
+    const business = await Business.findById(req.params.id);
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.status === 'closed') return res.status(400).json({ error: 'Business already closed' });
+
+    // Return capital to club capital
+    const clubCapital = await ClubCapital.findById(business.clubCapitalId);
+    if (clubCapital) {
+      const returnAmount = business.capital;
+      clubCapital.balance += returnAmount;
+      clubCapital.transactions.push({
+        type: 'capital_returned',
+        amount: returnAmount,
+        description: `Capital returned from closed business: ${business.name}`,
+        businessId: business._id,
+        date: new Date()
+      });
+      await clubCapital.save();
+    }
+
+    business.status = 'closed';
+    business.transactions.push({
+      type: 'capital_returned',
+      amount: business.capital,
+      description: 'Business closed - capital returned to club capital',
+      date: new Date()
+    });
+    await business.save();
+
+    res.json({ success: true, business });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+exports.distributeDividends = async (req, res) => {
+  try {
+    const business = await Business.findById(req.params.id);
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.totalProfit <= 0) return res.status(400).json({ error: 'No profit to distribute' });
+
+    const settings = await Setting.findOne();
+    const members = await Member.find({ active: true });
+    const totalProfit = business.totalProfit;
+
+    // Get dividend percentages from settings
+    const platinumPercent = settings?.dividendPlatinumPercent || 40;
+    const goldenPercent = settings?.dividendGoldenPercent || 30;
+    const silverPercent = settings?.dividendSilverPercent || 20;
+    const bronzePercent = settings?.dividendBronzePercent || 10;
+
+    // Calculate amounts per share type
+    const platinumAmount = (totalProfit * platinumPercent) / 100;
+    const goldenAmount = (totalProfit * goldenPercent) / 100;
+    const silverAmount = (totalProfit * silverPercent) / 100;
+    const bronzeAmount = (totalProfit * bronzePercent) / 100;
+
+    // Count members with each share type
+    const platinumMembers = members.filter(m => m.shares.platinum > 0);
+    const goldenMembers = members.filter(m => m.shares.golden > 0);
+    const silverMembers = members.filter(m => m.shares.silver > 0);
+    const bronzeMembers = members.filter(m => m.shares.bronze > 0);
+
+    // Calculate per member amounts
+    const perPlatinum = platinumMembers.length > 0 ? platinumAmount / platinumMembers.length : 0;
+    const perGolden = goldenMembers.length > 0 ? goldenAmount / goldenMembers.length : 0;
+    const perSilver = silverMembers.length > 0 ? silverAmount / silverMembers.length : 0;
+    const perBronze = bronzeMembers.length > 0 ? bronzeAmount / bronzeMembers.length : 0;
+
+    // Distribute to members
+    const distributions = [];
+    for (const member of members) {
+      let totalDividend = 0;
+      if (member.shares.platinum > 0) totalDividend += perPlatinum;
+      if (member.shares.golden > 0) totalDividend += perGolden;
+      if (member.shares.silver > 0) totalDividend += perSilver;
+      if (member.shares.bronze > 0) totalDividend += perBronze;
+
+      if (totalDividend > 0) {
+        member.savings += totalDividend;
+        member.totalDividendsReceived += totalDividend;
+        await member.save();
+
+        distributions.push({
+          memberId: member._id,
+          memberName: member.name,
+          platinumShares: member.shares.platinum,
+          goldenShares: member.shares.golden,
+          silverShares: member.shares.silver,
+          bronzeShares: member.shares.bronze,
+          platinumAmount: member.shares.platinum > 0 ? perPlatinum : 0,
+          goldenAmount: member.shares.golden > 0 ? perGolden : 0,
+          silverAmount: member.shares.silver > 0 ? perSilver : 0,
+          bronzeAmount: member.shares.bronze > 0 ? perBronze : 0,
+          totalAmount: totalDividend
+        });
+      }
+    }
+
+    // Create dividend record
+    const dividend = new Dividend({
+      businessId: business._id,
+      totalProfit: totalProfit,
+      platinumAmount,
+      goldenAmount,
+      silverAmount,
+      bronzeAmount,
+      platinumPercent,
+      goldenPercent,
+      silverPercent,
+      bronzePercent,
+      distributions,
+      distributedDate: new Date()
+    });
+    await dividend.save();
+
+    // Deduct from club capital
+    const clubCapital = await ClubCapital.findById(business.clubCapitalId);
+    if (clubCapital) {
+      clubCapital.balance -= totalProfit;
+      clubCapital.transactions.push({
+        type: 'dividend_payment',
+        amount: totalProfit,
+        description: `Dividend distribution from business: ${business.name}`,
+        businessId: business._id,
+        date: new Date()
+      });
+      await clubCapital.save();
+    }
+
+    // Reset business profit
+    business.totalProfit = 0;
+    await business.save();
+
+    res.json({ success: true, dividend, distributions });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};const ClubCapital = require('../models/ClubCapital');
+const Member = require('../models/Member');
+const Business = require('../models/Business');
+
+exports.getBalance = async (req, res) => {
+  try {
+    let capital = await ClubCapital.findOne();
+    if (!capital) {
+      capital = await ClubCapital.create({ balance: 0, transactions: [] });
+    }
+    res.json({ balance: capital.balance, transactions: capital.transactions });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+exports.addTransaction = async (req, res) => {
+  try {
+    const { type, amount, description, memberId, businessId } = req.body;
+    let capital = await ClubCapital.findOne();
+    if (!capital) {
+      capital = await ClubCapital.create({ balance: 0, transactions: [] });
+    }
+
+    const transaction = {
+      type,
+      amount,
+      description,
+      memberId,
+      businessId,
+      date: new Date()
+    };
+
+    if (['penalty', 'share_purchase', 'membership_fee', 'donation', 'business_profit', 'miscellaneous'].includes(type)) {
+      capital.balance += amount;
+    } else if (type === 'capital_to_business') {
+      if (capital.balance < amount) throw new Error('Insufficient club capital');
+      capital.balance -= amount;
+    } else if (type === 'capital_returned') {
+      capital.balance += amount;
+    } else if (type === 'dividend_payment') {
+      if (capital.balance < amount) throw new Error('Insufficient club capital for dividends');
+      capital.balance -= amount;
+    }
+
+    capital.transactions.push(transaction);
+    await capital.save();
+
+    res.json({ success: true, balance: capital.balance, transaction });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+exports.getTransactions = async (req, res) => {
+  try {
+    const capital = await ClubCapital.findOne();
+    if (!capital) return res.json({ transactions: [] });
+    res.json(capital.transactions);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};const Dividend = require('../models/Dividend');
+const Business = require('../models/Business');
+const Member = require('../models/Member');
+const Setting = require('../models/Setting');
+
+exports.getAllDividends = async (req, res) => {
+  try {
+    const dividends = await Dividend.find().populate('businessId', 'name').sort('-distributedDate');
+    res.json(dividends);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+exports.getDividend = async (req, res) => {
+  try {
+    const dividend = await Dividend.findById(req.params.id).populate('businessId', 'name');
+    if (!dividend) return res.status(404).json({ error: 'Dividend not found' });
+    res.json(dividend);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+exports.getMemberDividends = async (req, res) => {
+  try {
+    const { memberId } = req.params;
+    const dividends = await Dividend.find({
+      'distributions.memberId': memberId
+    }).sort('-distributedDate');
+    res.json(dividends);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+exports.getDividendSettings = async (req, res) => {
+  try {
+    const settings = await Setting.findOne();
+    res.json({
+      platinumPercent: settings?.dividendPlatinumPercent || 40,
+      goldenPercent: settings?.dividendGoldenPercent || 30,
+      silverPercent: settings?.dividendSilverPercent || 20,
+      bronzePercent: settings?.dividendBronzePercent || 10
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+exports.updateDividendSettings = async (req, res) => {
+  try {
+    const { platinumPercent, goldenPercent, silverPercent, bronzePercent } = req.body;
+    
+    // Validate total = 100%
+    const total = platinumPercent + goldenPercent + silverPercent + bronzePercent;
+    if (total !== 100) {
+      return res.status(400).json({ error: 'Total percentage must equal 100%' });
+    }
+
+    let settings = await Setting.findOne();
+    if (!settings) settings = new Setting();
+    settings.dividendPlatinumPercent = platinumPercent;
+    settings.dividendGoldenPercent = goldenPercent;
+    settings.dividendSilverPercent = silverPercent;
+    settings.dividendBronzePercent = bronzePercent;
+    await settings.save();
+
+    res.json({ success: true, settings });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+const Loan = require('../models/Loan');
+const Member = require('../models/Member');
+const Repayment = require('../models/Repayment');
+const Setting = require('../models/Setting');
+const mongoose = require('mongoose');
+
+// ==================== HELPER ====================
+async function getSettings() {
+  let settings = await Setting.findOne();
+  if (!settings) settings = await Setting.create({});
+  return settings;
+}
+
+// ==================== ELIGIBILITY ====================
+exports.getEligibility = async (req, res) => {
+  try {
+    const { memberId, type } = req.params;
+    const member = await Member.findById(memberId);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+    if (!member.active) return res.json({ eligible: false, reason: 'Member is inactive' });
+
+    const settings = await getSettings();
+    const maxAmount = member.savings * (settings.loanLimitPercent / 100);
+
+    let eligible = true;
+    let reason = null;
+
+    if (type === 'emergency' && member.shares.golden < 4) {
+      eligible = false;
+      reason = 'Requires at least 4 Golden shares';
+    }
+    if (type === 'school_fees' && member.shares.platinum < 1) {
+      eligible = false;
+      reason = 'Requires at least 1 Platinum share';
+    }
+    if (type === 'business' && (member.shares.platinum < 1 || member.shares.silver < 1)) {
+      eligible = false;
+      reason = 'Requires 1 Platinum and 1 Silver share';
+    }
+
+    res.json({
+      eligible,
+      reason,
+      maxAmount: Math.floor(maxAmount * 100) / 100,
+      memberSavings: member.savings
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== APPLY (MEMBER) ====================
+exports.applyLoan = async (req, res) => {
+  try {
+    const { memberId, type, amount, duration, purpose } = req.body;
+    const member = await Member.findById(memberId);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+
+    const settings = await getSettings();
+    let interestRate, finalDuration;
+
+    if (type === 'emergency') {
+      interestRate = settings.emergencyInterest || 5;
+      finalDuration = settings.emergencyDurationMonths || 1;
+    } else if (type === 'school_fees') {
+      interestRate = settings.schoolFeesInterest || 8;
+      finalDuration = duration || settings.schoolFeesDefaultMonths || 3;
+    } else if (type === 'business') {
+      interestRate = settings.businessInterest || 10;
+      finalDuration = duration || settings.businessDefaultMonths || 6;
+    } else {
+      return res.status(400).json({ error: 'Invalid loan type' });
+    }
+
+    const timeInYears = finalDuration / 12;
+    const totalRepayable = amount + (amount * (interestRate / 100) * timeInYears);
+
+    const loan = new Loan({
+      memberId,
+      type,
+      amount,
+      interestRate,
+      duration: finalDuration,
+      scheduleUnit: 'weekly',
+      totalRepayable: Math.round(totalRepayable * 100) / 100,
+      purpose,
+      status: 'pending',
+      appliedBy: 'member'
+    });
+    await loan.save();
+
+    res.status(201).json({ success: true, loan });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// ==================== APPLY (ADMIN) ====================
+exports.adminApplyLoan = async (req, res) => {
+  try {
+    const { memberId, type, amount, duration, purpose } = req.body;
+    const member = await Member.findById(memberId);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+
+    const settings = await getSettings();
+    let interestRate, finalDuration;
+
+    if (type === 'emergency') {
+      interestRate = settings.emergencyInterest || 5;
+      finalDuration = settings.emergencyDurationMonths || 1;
+    } else if (type === 'school_fees') {
+      interestRate = settings.schoolFeesInterest || 8;
+      finalDuration = duration || settings.schoolFeesDefaultMonths || 3;
+    } else if (type === 'business') {
+      interestRate = settings.businessInterest || 10;
+      finalDuration = duration || settings.businessDefaultMonths || 6;
+    } else {
+      return res.status(400).json({ error: 'Invalid loan type' });
+    }
+
+    const timeInYears = finalDuration / 12;
+    const totalRepayable = amount + (amount * (interestRate / 100) * timeInYears);
+
+    const loan = new Loan({
+      memberId,
+      type,
+      amount,
+      interestRate,
+      duration: finalDuration,
+      scheduleUnit: 'weekly',
+      totalRepayable: Math.round(totalRepayable * 100) / 100,
+      purpose,
+      status: 'pending',
+      appliedBy: 'admin'
+    });
+    await loan.save();
+
+    res.status(201).json({ success: true, loan });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// ==================== GET ALL ====================
+exports.getAllLoans = async (req, res) => {
+  try {
+    const loans = await Loan.find().populate('memberId', 'firstName surname memberNumber').sort('-createdAt');
+    res.json(loans);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== GET ONE ====================
+exports.getLoanWithSchedule = async (req, res) => {
+  try {
+    const loan = await Loan.findById(req.params.id).populate('memberId');
+    if (!loan) return res.status(404).json({ error: 'Loan not found' });
+    res.json(loan);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== UPDATE STATUS ====================
+exports.updateLoanStatus = async (req, res) => {
+  try {
+    const { status } = req.body;
+    const loan = await Loan.findById(req.params.id);
+    if (!loan) return res.status(404).json({ error: 'Loan not found' });
+
+    loan.status = status;
+    if (status === 'approved') loan.approvedDate = new Date();
+    if (status === 'disbursed') loan.disbursedDate = new Date();
+    if (status === 'active') loan.activeDate = new Date();
+    if (status === 'closed') loan.closedDate = new Date();
+    await loan.save();
+    res.json({ success: true, loan });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// ==================== SCHEDULE ====================
+exports.getRepaymentSchedule = async (req, res) => {
+  try {
+    const repayments = await Repayment.find({ loanId: req.params.id }).sort('installmentNumber');
+    res.json(repayments);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== STATEMENT ====================
+exports.getLoanStatement = async (req, res) => {
+  try {
+    const loan = await Loan.findById(req.params.id).populate('memberId');
+    if (!loan) return res.status(404).json({ error: 'Loan not found' });
+    const repayments = await Repayment.find({ loanId: loan._id }).sort('installmentNumber');
+    res.json({ loan, repayments });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== RECORD REPAYMENT ====================
+exports.recordRepayment = async (req, res) => {
+  try {
+    const repayment = await Repayment.findById(req.params.installmentId);
+    if (!repayment) return res.status(404).json({ error: 'Repayment not found' });
+
+    repayment.status = 'paid';
+    repayment.amountPaid = repayment.amountDue;
+    repayment.paidDate = new Date();
+    await repayment.save();
+
+    res.json({ success: true, repayment });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};const Member = require('../models/Member');
+
+// Generate random password
+const generatePassword = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+  let password = '';
+  for (let i = 0; i < 10; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+};
+
+// ==================== CREATE MEMBER ====================
+exports.createMember = async (req, res) => {
+  try {
+    const { 
+      firstName, surname, occupation, contact, email, address,
+      memberNumber, dateOfBirth, shares, nextOfKin
+    } = req.body;
+
+    const existingMember = await Member.findOne({ 
+      $or: [{ email }, { memberNumber }] 
+    });
+    if (existingMember) {
+      return res.status(400).json({ error: 'Email or Member Number already exists' });
+    }
+
+    const plainPassword = generatePassword();
+
+    const member = new Member({
+      firstName,
+      surname,
+      occupation,
+      contact,
+      email,
+      address,
+      memberNumber,
+      dateOfBirth,
+      password: plainPassword,
+      shares: {
+        golden: shares?.golden || 0,
+        platinum: shares?.platinum || 0,
+        silver: shares?.silver || 0,
+        bronze: shares?.bronze || 0
+      },
+      nextOfKin: {
+        fullName: nextOfKin?.fullName,
+        relationship: nextOfKin?.relationship,
+        contact: nextOfKin?.contact,
+        email: nextOfKin?.email,
+        address: nextOfKin?.address
+      }
+    });
+
+    await member.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Member created',
+      member: {
+        _id: member._id,
+        firstName: member.firstName,
+        surname: member.surname,
+        memberNumber: member.memberNumber,
+        email: member.email
+      },
+      generatedPassword: plainPassword
+    });
+
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// ==================== GET ALL MEMBERS ====================
+exports.getAllMembers = async (req, res) => {
+  try {
+    const members = await Member.find().sort({ createdAt: -1 });
+    res.json(members);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== GET MEMBER BY ID ====================
+exports.getMemberById = async (req, res) => {
+  try {
+    const member = await Member.findById(req.params.id);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+    res.json(member);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== UPDATE MEMBER ====================
+exports.updateMember = async (req, res) => {
+  try {
+    const member = await Member.findById(req.params.id);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+
+    const { firstName, surname, occupation, contact, email, address, dateOfBirth, shares, nextOfKin, active } = req.body;
+
+    member.firstName = firstName || member.firstName;
+    member.surname = surname || member.surname;
+    member.occupation = occupation || member.occupation;
+    member.contact = contact || member.contact;
+    member.email = email || member.email;
+    member.address = address || member.address;
+    member.dateOfBirth = dateOfBirth || member.dateOfBirth;
+    member.active = active !== undefined ? active : member.active;
+
+    if (shares) {
+      member.shares.golden = shares.golden !== undefined ? shares.golden : member.shares.golden;
+      member.shares.platinum = shares.platinum !== undefined ? shares.platinum : member.shares.platinum;
+      member.shares.silver = shares.silver !== undefined ? shares.silver : member.shares.silver;
+      member.shares.bronze = shares.bronze !== undefined ? shares.bronze : member.shares.bronze;
+    }
+
+    if (nextOfKin) {
+      member.nextOfKin.fullName = nextOfKin.fullName || member.nextOfKin.fullName;
+      member.nextOfKin.relationship = nextOfKin.relationship || member.nextOfKin.relationship;
+      member.nextOfKin.contact = nextOfKin.contact || member.nextOfKin.contact;
+      member.nextOfKin.email = nextOfKin.email || member.nextOfKin.email;
+      member.nextOfKin.address = nextOfKin.address || member.nextOfKin.address;
+    }
+
+    await member.save();
+    res.json({ success: true, message: 'Member updated', member });
+
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// ==================== DELETE MEMBER ====================
+exports.deleteMember = async (req, res) => {
+  try {
+    const member = await Member.findByIdAndDelete(req.params.id);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+    res.json({ success: true, message: 'Member deleted' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== GENERATE PASSWORD ====================
+exports.generatePassword = async (req, res) => {
+  res.json({ password: generatePassword() });
+};
+
+// ==================== CHANGE PASSWORD ====================
+exports.changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const member = await Member.findById(req.params.id);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+
+    const isMatch = await member.comparePassword(currentPassword);
+    if (!isMatch) return res.status(400).json({ error: 'Current password is incorrect' });
+
+    member.password = newPassword;
+    await member.save();
+    res.json({ success: true, message: 'Password changed' });
+
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+const Member = require('../models/Member');
+const Loan = require('../models/Loan');
+const Repayment = require('../models/Repayment');
+const ClubCapital = require('../models/ClubCapital');
+const Business = require('../models/Business');
+const Dividend = require('../models/Dividend');
+const Investment = require('../models/Investment');
+
+exports.getClubSummary = async (req, res) => {
+  try {
+    const members = await Member.find({ active: true });
+    const totalSavings = members.reduce((sum, m) => sum + m.savings, 0);
+    const totalExtraSavings = members.reduce((sum, m) => sum + m.extraSavings, 0);
+    const totalPenalties = members.reduce((sum, m) => sum + m.penalties, 0);
+    const totalDividends = members.reduce((sum, m) => sum + m.totalDividendsReceived, 0);
+
+    const capital = await ClubCapital.findOne();
+    const businesses = await Business.find();
+
+    const loans = await Loan.find();
+    const totalLoans = loans.length;
+    const totalLoanAmount = loans.reduce((sum, l) => sum + l.amount, 0);
+    const pendingLoans = loans.filter(l => l.status === 'pending').length;
+    const activeLoans = loans.filter(l => l.status === 'active').length;
+    const closedLoans = loans.filter(l => l.status === 'closed').length;
+
+    res.json({
+      summary: {
+        totalMembers: members.length,
+        totalSavings,
+        totalExtraSavings,
+        totalPenalties,
+        totalDividends,
+        clubCapital: capital?.balance || 0,
+        activeBusinesses: businesses.filter(b => b.status === 'active').length,
+        totalLoans,
+        totalLoanAmount,
+        pendingLoans,
+        activeLoans,
+        closedLoans
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+exports.getMemberReport = async (req, res) => {
+  try {
+    const member = await Member.findById(req.params.id);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+
+    const loans = await Loan.find({ memberId: member._id }).populate('businessId', 'name');
+    const repayments = await Repayment.find({ loanId: { $in: loans.map(l => l._id) } });
+    const dividends = await Dividend.find({ 'distributions.memberId': member._id });
+
+    res.json({
+      member,
+      loans: {
+        total: loans.length,
+        active: loans.filter(l => l.status === 'active').length,
+        closed: loans.filter(l => l.status === 'closed').length,
+        defaulted: loans.filter(l => l.defaulted).length,
+        details: loans
+      },
+      repayments: {
+        total: repayments.length,
+        paid: repayments.filter(r => r.status === 'paid').length,
+        pending: repayments.filter(r => r.status === 'pending').length,
+        defaulted: repayments.filter(r => r.status === 'defaulted').length
+      },
+      dividends: {
+        total: dividends.length,
+        totalAmount: dividends.reduce((sum, d) => {
+          const dist = d.distributions.find(dd => dd.memberId.toString() === member._id.toString());
+          return sum + (dist?.totalAmount || 0);
+        }, 0)
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+exports.getLoanReport = async (req, res) => {
+  try {
+    const loans = await Loan.find().populate('memberId', 'name memberNumber');
+    const total = loans.length;
+    const pending = loans.filter(l => l.status === 'pending').length;
+    const approved = loans.filter(l => l.status === 'approved').length;
+    const disbursed = loans.filter(l => l.status === 'disbursed').length;
+    const active = loans.filter(l => l.status === 'active').length;
+    const closed = loans.filter(l => l.status === 'closed').length;
+    const rejected = loans.filter(l => l.status === 'rejected').length;
+    const writeOff = loans.filter(l => l.status === 'writeOff').length;
+    const defaulted = loans.filter(l => l.defaulted).length;
+
+    const totalAmount = loans.reduce((sum, l) => sum + l.amount, 0);
+    const totalRepayable = loans.reduce((sum, l) => sum + l.totalRepayable, 0);
+    const totalInterest = totalRepayable - totalAmount;
+
+    res.json({
+      summary: {
+        total,
+        pending,
+        approved,
+        disbursed,
+        active,
+        closed,
+        rejected,
+        writeOff,
+        defaulted,
+        totalAmount,
+        totalInterest,
+        totalRepayable
+      },
+      loans
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+exports.getDividendReport = async (req, res) => {
+  try {
+    const dividends = await Dividend.find().populate('businessId', 'name').sort('-distributedDate');
+    const totalDistributed = dividends.reduce((sum, d) => sum + d.totalProfit, 0);
+    const totalMembers = new Set();
+    dividends.forEach(d => d.distributions.forEach(dd => totalMembers.add(dd.memberId.toString())));
+
+    res.json({
+      summary: {
+        totalDividendRounds: dividends.length,
+        totalDistributed,
+        totalMembersBenefited: totalMembers.size
+      },
+      dividends
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+exports.getBusinessReport = async (req, res) => {
+  try {
+    const businesses = await Business.find();
+    const active = businesses.filter(b => b.status === 'active');
+    const closed = businesses.filter(b => b.status === 'closed');
+
+    const totalCapital = businesses.reduce((sum, b) => sum + b.capital, 0);
+    const totalProfit = businesses.reduce((sum, b) => sum + b.totalProfit, 0);
+    const totalLoss = businesses.reduce((sum, b) => sum + b.totalLoss, 0);
+
+    res.json({
+      summary: {
+        totalBusinesses: businesses.length,
+        activeBusinesses: active.length,
+        closedBusinesses: closed.length,
+        totalCapital,
+        totalProfit,
+        totalLoss,
+        netProfit: totalProfit - totalLoss
+      },
+      businesses
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};const Saving = require('../models/Saving');
+const Member = require('../models/Member');
+const ClubSetting = require('../models/ClubSetting');
+const PDFDocument = require('pdfkit');
+
+// ==================== ADD SAVING ====================
+exports.addSaving = async (req, res) => {
+  try {
+    const { memberId, category, amount, description, month, shareType, shareQuantity } = req.body;
+
+    // Member-owned categories need member
+   if (['monthly', 'extra', 'penalty', 'membership', 'shares', 'misc'].includes(category) && !memberId) {
+  return res.status(400).json({ error: 'Member required' });
+}
+
+    let finalAmount = amount;
+
+    // For monthly savings, use agreed amount
+    if (category === 'monthly') {
+      const year = new Date().getFullYear();
+      const setting = await ClubSetting.findOne({ year });
+      if (setting && setting.agreedMonthlyAmount) {
+        finalAmount = setting.agreedMonthlyAmount;
+      }
+    }
+
+    // For membership, use club membership fee
+    if (category === 'membership') {
+      const year = new Date().getFullYear();
+      const setting = await ClubSetting.findOne({ year });
+      if (setting && setting.membershipFee) {
+        finalAmount = setting.membershipFee;
+      }
+    }
+
+    const saving = new Saving({
+      memberId: ['monthly', 'extra', 'penalty', 'membership', 'shares', 'misc'].includes(category) ? memberId : null,      category,
+      amount: finalAmount,
+      description,
+      month,
+      shareType,
+      shareQuantity: shareQuantity || 0
+    });
+
+    await saving.save();
+
+    // If shares, update member shares
+    if (category === 'shares' && memberId && shareType && shareQuantity) {
+      const member = await Member.findById(memberId);
+      if (member) {
+        member.shares[shareType] = (member.shares[shareType] || 0) + shareQuantity;
+        await member.save();
+      }
+    }
+
+    res.status(201).json({ success: true, saving });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// ==================== GET ALL SAVINGS ====================
+exports.getAllSavings = async (req, res) => {
+  try {
+    const savings = await Saving.find()
+      .populate('memberId', 'firstName surname memberNumber')
+      .sort('-date');
+    res.json(savings);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== SUMMARY ====================
+exports.getSummary = async (req, res) => {
+  try {
+    const all = await Saving.find();
+    const total = all.reduce((s, x) => s + x.amount, 0);
+
+    const memberTotal = all
+      .filter(s => ['monthly', 'extra'].includes(s.category))
+      .reduce((s, x) => s + x.amount, 0);
+
+    const capitalTotal = all
+      .filter(s => ['misc', 'donation', 'penalty', 'business_profit', 'shares', 'membership'].includes(s.category))
+      .reduce((s, x) => s + x.amount, 0);
+
+    res.json({
+      generalSavings: total,
+      memberSavings: memberTotal,
+      clubCapital: capitalTotal
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== MEMBER SAVINGS TABLE ====================
+exports.getMemberSavingsList = async (req, res) => {
+  try {
+    const members = await Member.find();
+    const all = await Saving.find();
+
+    const result = members.map(m => {
+      const memberSavings = all.filter(s => s.memberId && s.memberId.toString() === m._id.toString());
+
+      const monthly = memberSavings.filter(s => s.category === 'monthly').reduce((sum, s) => sum + s.amount, 0);
+      const extra = memberSavings.filter(s => s.category === 'extra').reduce((sum, s) => sum + s.amount, 0);
+      const penalties = memberSavings.filter(s => s.category === 'penalty').reduce((sum, s) => sum + s.amount, 0);
+      const membership = memberSavings.filter(s => s.category === 'membership').reduce((sum, s) => sum + s.amount, 0);
+      const sharesValue = memberSavings.filter(s => s.category === 'shares').reduce((sum, s) => sum + s.amount, 0);
+
+      return {
+        _id: m._id,
+        memberNumber: m.memberNumber,
+        name: `${m.firstName} ${m.surname}`,
+        monthlySavings: monthly,
+        extraSavings: extra,
+        totalSavings: monthly + extra,
+        penalties,
+        membership,
+        sharesValue
+      };
+    });
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== SET AGREED MONTHLY ====================
+exports.setAgreedMonthly = async (req, res) => {
+  try {
+    const { year, amount } = req.body;
+    let setting = await ClubSetting.findOne({ year });
+    if (setting) setting.agreedMonthlyAmount = amount;
+    else setting = new ClubSetting({ year, agreedMonthlyAmount: amount });
+    await setting.save();
+    res.json({ success: true, setting });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// ==================== SET MEMBERSHIP FEE ====================
+exports.setMembershipFee = async (req, res) => {
+  try {
+    const { year, amount } = req.body;
+    let setting = await ClubSetting.findOne({ year });
+    if (setting) setting.membershipFee = amount;
+    else setting = new ClubSetting({ year, membershipFee: amount });
+    await setting.save();
+    res.json({ success: true, setting });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// ==================== GET SETTINGS ====================
+exports.getSettings = async (req, res) => {
+  try {
+    const settings = await ClubSetting.find().sort('-year');
+    res.json(settings);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== MEMBER STATEMENT PDF ====================
+exports.downloadMemberStatement = async (req, res) => {
+  try {
+    const member = await Member.findById(req.params.memberId);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+
+    const { from, to, period } = req.query;
+    const query = { memberId: member._id };
+
+    if (from || to) {
+      query.date = {};
+      if (from) query.date.$gte = new Date(from);
+      if (to) {
+        const toDate = new Date(to);
+        toDate.setHours(23, 59, 59);
+        query.date.$lte = toDate;
+      }
+    } else if (period) {
+      const range = getPeriodRange(period);
+      if (range) query.date = { $gte: range.from, $lte: range.to };
+    }
+
+    const savings = await Saving.find(query).sort('date');
+
+    const doc = new PDFDocument({ margin: 50 });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=statement-${member.memberNumber}.pdf`);
+    doc.pipe(res);
+
+    doc.fontSize(18).text('CRESTED SS INVESTMENT CLUB LTD', { align: 'center' });
+    doc.fontSize(12).text('Member Savings Statement', { align: 'center' });
+    doc.moveDown();
+    doc.text(`Member: ${member.firstName} ${member.surname}`);
+    doc.text(`Member Number: ${member.memberNumber}`);
+    doc.text(`Period: ${from || 'start'} to ${to || 'today'}`);
+    doc.text(`Generated: ${new Date().toLocaleDateString()}`);
+    doc.moveDown();
+
+    doc.text('Transactions:', { underline: true });
+    doc.moveDown(0.5);
+
+    let total = 0;
+    if (savings.length === 0) {
+      doc.text('No transactions in this period.');
+    } else {
+      savings.forEach(s => {
+        total += s.amount;
+        doc.text(`${new Date(s.date).toLocaleDateString()} — ${s.category.toUpperCase()} — UGX ${s.amount.toLocaleString()} — Balance: UGX ${total.toLocaleString()}`);
+      });
+    }
+
+    doc.moveDown();
+    doc.fontSize(14).text(`Total: UGX ${total.toLocaleString()}`, { bold: true });
+    doc.end();
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== CLUB CAPITAL PDF ====================
+exports.downloadClubCapitalReport = async (req, res) => {
+  try {
+    const { from, to, period } = req.query;
+    const query = {
+      category: { $in: ['misc', 'donation', 'penalty', 'business_profit', 'shares', 'membership'] }
+    };
+
+    if (from || to) {
+      query.date = {};
+      if (from) query.date.$gte = new Date(from);
+      if (to) {
+        const toDate = new Date(to);
+        toDate.setHours(23, 59, 59);
+        query.date.$lte = toDate;
+      }
+    } else if (period) {
+      const range = getPeriodRange(period);
+      if (range) query.date = { $gte: range.from, $lte: range.to };
+    }
+
+    const capital = await Saving.find(query).populate('memberId', 'firstName surname memberNumber').sort('date');
+
+    const doc = new PDFDocument({ margin: 50 });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename=club-capital-report.pdf');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('CRESTED SS INVESTMENT CLUB LTD', { align: 'center' });
+    doc.fontSize(12).text('Club Capital Report', { align: 'center' });
+    doc.moveDown();
+    doc.text(`Period: ${from || 'start'} to ${to || 'today'}`);
+    doc.text(`Generated: ${new Date().toLocaleDateString()}`);
+    doc.moveDown();
+
+    let total = 0;
+    const categoryTotals = {};
+
+    if (capital.length === 0) {
+      doc.text('No transactions in this period.');
+    } else {
+      capital.forEach(s => {
+        total += s.amount;
+        categoryTotals[s.category] = (categoryTotals[s.category] || 0) + s.amount;
+        const memberName = s.memberId ? ` — ${s.memberId.firstName} ${s.memberId.surname}` : '';
+        doc.text(`${new Date(s.date).toLocaleDateString()} — ${s.category.toUpperCase()}${memberName} — UGX ${s.amount.toLocaleString()}${s.description ? ' — ' + s.description : ''}`);
+      });
+
+      doc.moveDown();
+      doc.fontSize(12).text('Category Breakdown:', { underline: true });
+      Object.entries(categoryTotals).forEach(([cat, amt]) => {
+        doc.text(`  ${cat.toUpperCase()}: UGX ${amt.toLocaleString()}`);
+      });
+    }
+
+    doc.moveDown();
+    doc.fontSize(14).text(`Total Club Capital: UGX ${total.toLocaleString()}`, { bold: true });
+    doc.end();
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== GENERAL REPORT PDF ====================
+exports.downloadGeneralReport = async (req, res) => {
+  try {
+    const { from, to, period } = req.query;
+    const query = {};
+
+    if (from || to) {
+      query.date = {};
+      if (from) query.date.$gte = new Date(from);
+      if (to) {
+        const toDate = new Date(to);
+        toDate.setHours(23, 59, 59);
+        query.date.$lte = toDate;
+      }
+    } else if (period) {
+      const range = getPeriodRange(period);
+      if (range) query.date = { $gte: range.from, $lte: range.to };
+    }
+
+    const all = await Saving.find(query).populate('memberId', 'firstName surname memberNumber').sort('date');
+
+    const doc = new PDFDocument({ margin: 50 });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename=general-savings-report.pdf');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('CRESTED SS INVESTMENT CLUB LTD', { align: 'center' });
+    doc.fontSize(12).text('General Savings Report', { align: 'center' });
+    doc.moveDown();
+    doc.text(`Period: ${from || 'start'} to ${to || 'today'}`);
+    doc.text(`Generated: ${new Date().toLocaleDateString()}`);
+    doc.moveDown();
+
+    let total = 0;
+    let memberTotal = 0;
+    let capitalTotal = 0;
+    const categoryTotals = {};
+
+    if (all.length === 0) {
+      doc.text('No transactions in this period.');
+    } else {
+      all.forEach(s => {
+        total += s.amount;
+        categoryTotals[s.category] = (categoryTotals[s.category] || 0) + s.amount;
+        if (['monthly', 'extra'].includes(s.category)) memberTotal += s.amount;
+        if (['misc', 'donation', 'penalty', 'business_profit', 'shares', 'membership'].includes(s.category)) capitalTotal += s.amount;
+
+        const memberName = s.memberId ? ` — ${s.memberId.firstName} ${s.memberId.surname}` : '';
+        doc.text(`${new Date(s.date).toLocaleDateString()} — ${s.category.toUpperCase()}${memberName} — UGX ${s.amount.toLocaleString()}${s.description ? ' — ' + s.description : ''}`);
+      });
+
+      doc.moveDown();
+      doc.fontSize(12).text('Category Breakdown:', { underline: true });
+      Object.entries(categoryTotals).forEach(([cat, amt]) => {
+        doc.text(`  ${cat.toUpperCase()}: UGX ${amt.toLocaleString()}`);
+      });
+    }
+
+    doc.moveDown();
+    doc.fontSize(12).text(`Total Member Savings: UGX ${memberTotal.toLocaleString()}`);
+    doc.fontSize(12).text(`Total Club Capital: UGX ${capitalTotal.toLocaleString()}`);
+    doc.fontSize(14).text(`Grand Total: UGX ${total.toLocaleString()}`, { bold: true });
+    doc.end();
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== PERIOD HELPER ====================
+function getPeriodRange(period) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const endOfToday = new Date(today);
+  endOfToday.setHours(23, 59, 59);
+
+  if (period === 'today') {
+    return { from: today, to: endOfToday };
+  }
+  if (period === 'this_month') {
+    const from = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { from, to: endOfToday };
+  }
+  if (period === 'this_year') {
+    const from = new Date(now.getFullYear(), 0, 1);
+    return { from, to: endOfToday };
+  }
+  if (period === 'last_month') {
+    const from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const to = new Date(now.getFullYear(), now.getMonth(), 0);
+    to.setHours(23, 59, 59);
+    return { from, to };
+  }
+  if (period === 'last_year') {
+    const from = new Date(now.getFullYear() - 1, 0, 1);
+    const to = new Date(now.getFullYear() - 1, 11, 31);
+    to.setHours(23, 59, 59);
+    return { from, to };
+  }
+  return null;
+}
+
+// ==================== GENERAL REPORT PDF ====================
+exports.downloadGeneralReport = async (req, res) => {
+  try {
+    const all = await Saving.find().populate('memberId', 'firstName surname memberNumber').sort('date');
+
+    const doc = new PDFDocument({ margin: 50 });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename=general-savings-report.pdf');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('CRESTED SS INVESTMENT CLUB LTD', { align: 'center' });
+    doc.fontSize(12).text('General Savings Report', { align: 'center' });
+    doc.moveDown();
+    doc.text(`Generated: ${new Date().toLocaleDateString()}`);
+    doc.moveDown();
+
+    let total = 0;
+    all.forEach(s => {
+      total += s.amount;
+      const memberName = s.memberId ? `${s.memberId.firstName} ${s.memberId.surname}` : 'Club';
+      doc.text(`${new Date(s.date).toLocaleDateString()} — ${memberName} — ${s.category.toUpperCase()} — UGX ${s.amount.toLocaleString()}`);
+    });
+
+    doc.moveDown();
+    doc.fontSize(14).text(`Grand Total: UGX ${total.toLocaleString()}`, { bold: true });
+    doc.end();
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};const Member = require('../models/Member');
+const ClubCapital = require('../models/ClubCapital');
+const Setting = require('../models/Setting');
+const Investment = require('../models/Investment');
+
+// Add monthly savings to all members
+exports.addMonthlySavings = async (req, res) => {
+  try {
+    const settings = await Setting.findOne();
+    const amount = settings?.monthlySavingsAmount || 0;
+    if (amount <= 0) return res.status(400).json({ error: 'Monthly savings amount not set' });
+
+    const members = await Member.find({ active: true });
+    for (const member of members) {
+      member.savings += amount;
+      await member.save();
+    }
+
+    res.json({ 
+      success: true, 
+      message: `Added ${amount} to all members`, 
+      membersUpdated: members.length 
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// Add extra savings for a specific member
+exports.addExtraSavings = async (req, res) => {
+  try {
+    const { memberId, amount, description } = req.body;
+    const member = await Member.findById(memberId);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+
+    member.extraSavings += amount;
+    member.savings += amount;
+    await member.save();
+
+    res.json({ success: true, member });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// Add penalty (goes to club capital)
+exports.addPenalty = async (req, res) => {
+  try {
+    const { memberId, amount, description } = req.body;
+    const member = await Member.findById(memberId);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+
+    member.penalties += amount;
+    await member.save();
+
+    let capital = await ClubCapital.findOne();
+    if (!capital) capital = await ClubCapital.create({ balance: 0, transactions: [] });
+    capital.balance += amount;
+    capital.transactions.push({
+      type: 'penalty',
+      amount,
+      description: description || `Penalty for ${member.name}`,
+      memberId: member._id,
+      date: new Date()
+    });
+    await capital.save();
+
+    res.json({ success: true, member, clubCapital: capital.balance });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// Buy shares (goes to club capital)
+exports.buyShares = async (req, res) => {
+  try {
+    const { memberId, shareType, quantity, pricePerShare } = req.body;
+    const member = await Member.findById(memberId);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+
+    const totalCost = quantity * pricePerShare;
+    if (member.savings < totalCost) {
+      return res.status(400).json({ error: 'Insufficient savings' });
+    }
+
+    member.savings -= totalCost;
+    member.shares[shareType] = (member.shares[shareType] || 0) + quantity;
+    await member.save();
+
+    let capital = await ClubCapital.findOne();
+    if (!capital) capital = await ClubCapital.create({ balance: 0, transactions: [] });
+    capital.balance += totalCost;
+    capital.transactions.push({
+      type: 'share_purchase',
+      amount: totalCost,
+      description: `${quantity} ${shareType} shares bought by ${member.name}`,
+      memberId: member._id,
+      date: new Date()
+    });
+    await capital.save();
+
+    res.json({ success: true, member, clubCapital: capital.balance });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// Add membership fee (goes to club capital)
+exports.addMembershipFee = async (req, res) => {
+  try {
+    const { memberId, amount } = req.body;
+    const member = await Member.findById(memberId);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+
+    member.membershipFeePaid += amount;
+    await member.save();
+
+    let capital = await ClubCapital.findOne();
+    if (!capital) capital = await ClubCapital.create({ balance: 0, transactions: [] });
+    capital.balance += amount;
+    capital.transactions.push({
+      type: 'membership_fee',
+      amount,
+      description: `Membership fee from ${member.name}`,
+      memberId: member._id,
+      date: new Date()
+    });
+    await capital.save();
+
+    res.json({ success: true, member, clubCapital: capital.balance });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// Add donation (goes to club capital)
+exports.addDonation = async (req, res) => {
+  try {
+    const { amount, description } = req.body;
+    
+    let capital = await ClubCapital.findOne();
+    if (!capital) capital = await ClubCapital.create({ balance: 0, transactions: [] });
+    capital.balance += amount;
+    capital.transactions.push({
+      type: 'donation',
+      amount,
+      description: description || 'Donation received',
+      date: new Date()
+    });
+    await capital.save();
+
+    res.json({ success: true, clubCapital: capital.balance });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// Add miscellaneous (goes to club capital)
+exports.addMiscellaneous = async (req, res) => {
+  try {
+    const { amount, description } = req.body;
+    
+    let capital = await ClubCapital.findOne();
+    if (!capital) capital = await ClubCapital.create({ balance: 0, transactions: [] });
+    capital.balance += amount;
+    capital.transactions.push({
+      type: 'miscellaneous',
+      amount,
+      description: description || 'Miscellaneous income',
+      date: new Date()
+    });
+    await capital.save();
+
+    res.json({ success: true, clubCapital: capital.balance });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// Get all members with their savings
+exports.getMemberSavings = async (req, res) => {
+  try {
+    const members = await Member.find({ active: true }).sort('name');
+    res.json(members);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Get member transaction history
+exports.getMemberTransactions = async (req, res) => {
+  try {
+    const member = await Member.findById(req.params.id);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+
+    res.json({ 
+      member: {
+        name: member.name,
+        memberNumber: member.memberNumber,
+        savings: member.savings,
+        extraSavings: member.extraSavings,
+        penalties: member.penalties,
+        membershipFeePaid: member.membershipFeePaid,
+        totalDividendsReceived: member.totalDividendsReceived,
+        shares: member.shares
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Purchase land/asset (equal deduction from all active members)
+exports.purchaseInvestment = async (req, res) => {
+  try {
+    const { name, type, purchasePrice, description } = req.body;
+    const members = await Member.find({ active: true });
+    if (members.length === 0) return res.status(400).json({ error: 'No active members' });
+
+    const perMember = purchasePrice / members.length;
+    
+    const investmentMembers = [];
+    for (const member of members) {
+      if (member.savings < perMember) {
+        return res.status(400).json({ error: `${member.name} has insufficient savings` });
+      }
+      member.savings -= perMember;
+      await member.save();
+      investmentMembers.push({
+        memberId: member._id,
+        amountDeducted: perMember,
+        amountAdded: 0
+      });
+    }
+
+    const investment = new Investment({
+      name,
+      type: type || 'land',
+      purchasePrice,
+      totalMembers: members.length,
+      members: investmentMembers,
+      status: 'owned',
+      description
+    });
+    await investment.save();
+
+    res.json({ success: true, investment, perMember });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// Sell investment (equal addition to all members)
+exports.sellInvestment = async (req, res) => {
+  try {
+    const { salePrice } = req.body;
+    const investment = await Investment.findById(req.params.id);
+    if (!investment) return res.status(404).json({ error: 'Investment not found' });
+    if (investment.status === 'sold') return res.status(400).json({ error: 'Already sold' });
+
+    const members = await Member.find({ active: true });
+    const perMember = salePrice / members.length;
+
+    for (const member of members) {
+      member.savings += perMember;
+      await member.save();
+    }
+
+    investment.salePrice = salePrice;
+    investment.saleDate = new Date();
+    investment.status = 'sold';
+    for (const m of investment.members) {
+      m.amountAdded = perMember;
+    }
+    await investment.save();
+
+    res.json({ success: true, investment, perMember });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// Get all investments
+exports.getInvestments = async (req, res) => {
+  try {
+    const investments = await Investment.find().populate('members.memberId', 'name');
+    res.json(investments);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};const Setting = require('../models/Setting');
+const ShareSettings = require('../models/shareSettings.models');
+
+// ==================== LOAN SETTINGS ====================
+exports.getSettings = async (req, res) => {
+  try {
+    let settings = await Setting.findOne();
+    if (!settings) {
+      settings = await Setting.create({
+        loanLimitPercent: 70,
+        emergencyInterest: 5,
+        schoolFeesInterest: 8,
+        businessInterest: 10,
+        emergencyDurationMonths: 1,
+        schoolFeesDefaultMonths: 3,
+        businessDefaultMonths: 6,
+        dividendPlatinumPercent: 40,
+        dividendGoldenPercent: 30,
+        dividendSilverPercent: 20,
+        dividendBronzePercent: 10,
+        monthlySavingsAmount: 0,
+        membershipFeeAmount: 0
+      });
+    }
+    res.json(settings);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+exports.updateSettings = async (req, res) => {
+  try {
+    let settings = await Setting.findOne();
+    if (!settings) settings = new Setting();
+    Object.assign(settings, req.body);
+    await settings.save();
+    res.json(settings);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// ==================== SHARE SETTINGS ====================
+exports.getShareSettings = async (req, res) => {
+  try {
+    let settings = await ShareSettings.findOne();
+    if (!settings) {
+      settings = await ShareSettings.create({
+        shareTypes: {
+          ordinary: { name: 'Ordinary', price: 100000, maxShares: 15, active: true },
+          silver:   { name: 'Silver',   price: 250000, maxShares: 10, active: true },
+          golden:   { name: 'Golden',   price: 500000, maxShares: 5,  active: true },
+          platinum: { name: 'Platinum', price: 1000000, maxShares: 3, active: true }
+        }
+      });
+    }
+    res.json(settings);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+exports.updateShareSettings = async (req, res) => {
+  try {
+    let settings = await ShareSettings.findOne();
+    if (!settings) {
+      settings = new ShareSettings(req.body);
+    } else {
+      if (req.body.shareTypes) {
+        settings.shareTypes = {
+          ...settings.shareTypes,
+          ...req.body.shareTypes
+        };
+      }
+      if (req.body.updatedBy) settings.updatedBy = req.body.updatedBy;
+      settings.updatedAt = new Date();
+    }
+    await settings.save();
+    res.json(settings);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+}; 
+=== ROUTES === 
+const express = require('express');
+const router = express.Router();
+const Account = require('../models/accounts.models');
+const User = require('../models/users.models');
+
+// Get all accounts
+router.get('/', async (req, res) => {
+  try {
+    const { page = 1, limit = 10, status, search } = req.query;
+    const query = {};
+    
+    // Status filter
+    if (status) {
+      query.accountStatus = status.toLowerCase();
+    }
+    
+    // Search functionality
+    if (search) {
+      query.memberNumber = { $regex: search, $options: 'i' };
+    }
+    
+    const accounts = await Account.find(query)
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .sort({ createdAt: -1 })
+      .select('-__v');
+      
+    const total = await Account.countDocuments(query);
+    
+    // Calculate summary statistics
+    const summary = await Account.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: null,
+          totalSavings: { $sum: '$savings' },
+          totalShares: { $sum: '$sharesOwned' },
+          totalContributions: { $sum: '$monthlyContribution' },
+          activeAccounts: {
+            $sum: { $cond: [{ $eq: ['$accountStatus', 'active'] }, 1, 0] }
+          }
+        }
+      }
+    ]);
+    
+    res.json({
+      accounts,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+      totalAccounts: total,
+      summary: summary[0] || {
+        totalSavings: 0,
+        totalShares: 0,
+        totalContributions: 0,
+        activeAccounts: 0
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch accounts', 
+      details: error.message 
+    });
+  }
+});
+
+// Get account by member number
+router.get('/:id', async (req, res) => {
+  try {
+    const account = await Account.findOne({ 
+      memberNumber: req.params.id.toUpperCase() 
+    }).select('-__v');
+    
+    if (!account) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+    
+    res.json(account);
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch account', 
+      details: error.message 
+    });
+  }
+});
+
+// Create a new account
+router.post('/', async (req, res) => {
+  try {
+    const { memberNumber, savings, monthlyContribution, sharesOwned, accountStatus, notes } = req.body;
+
+    if (!memberNumber) {
+      return res.status(400).json({ error: 'Member number is required' });
+    }
+
+    // Check if user exists
+    const user = await User.findOne({ 
+      memberNumber: memberNumber.toUpperCase() 
+    });
+    
+    if (!user) {
+      return res.status(400).json({ 
+        error: 'User not found', 
+        details: 'Member must be registered as a user first' 
+      });
+    }
+
+    // Check if account already exists
+    const existingAccount = await Account.findOne({ 
+      memberNumber: memberNumber.toUpperCase() 
+    });
+    
+    if (existingAccount) {
+      return res.status(400).json({ 
+        error: 'Account already exists', 
+        details: 'Account for this member number already exists' 
+      });
+    }
+
+    const newAccount = new Account({
+      memberNumber,
+      savings: savings || 0,
+      monthlyContribution: monthlyContribution || 0,
+      sharesOwned: sharesOwned || 0,
+      accountStatus: accountStatus || 'pending',
+      notes
+    });
+
+    const savedAccount = await newAccount.save();
+    res.status(201).json(savedAccount);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        details: errors 
+      });
+    }
+    res.status(500).json({ 
+      error: 'Failed to create account', 
+      details: error.message 
+    });
+  }
+});
+
+// Update account
+router.put('/:id', async (req, res) => {
+  try {
+    const { savings, monthlyContribution, sharesOwned, accountStatus, notes } = req.body;
+    
+    const updatedAccount = await Account.findOneAndUpdate(
+      { memberNumber: req.params.id.toUpperCase() },
+      {
+        savings,
+        monthlyContribution,
+        sharesOwned,
+        accountStatus,
+        notes,
+        lastTransactionDate: new Date()
+      },
+      { 
+        new: true, 
+        runValidators: true,
+        omitUndefined: true
+      }
+    ).select('-__v');
+
+    if (!updatedAccount) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+
+    res.json(updatedAccount);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        details: errors 
+      });
+    }
+    res.status(500).json({ 
+      error: 'Failed to update account', 
+      details: error.message 
+    });
+  }
+});
+
+// Delete account
+router.delete('/:id', async (req, res) => {
+  try {
+    const deletedAccount = await Account.findOneAndDelete({ 
+      memberNumber: req.params.id.toUpperCase() 
+    });
+
+    if (!deletedAccount) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+
+    res.json({ 
+      message: 'Account deleted successfully', 
+      account: deletedAccount 
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to delete account', 
+      details: error.message 
+    });
+  }
+});
+
+// Update account balance (credit/debit)
+router.patch('/:id/balance', async (req, res) => {
+  try {
+    const { amount, type, description } = req.body;
+    
+    if (!amount || !type) {
+      return res.status(400).json({ 
+        error: 'Amount and type are required',
+        details: 'Type must be "credit" or "debit"'
+      });
+    }
+    
+    if (type !== 'credit' && type !== 'debit') {
+      return res.status(400).json({ 
+        error: 'Invalid transaction type',
+        details: 'Type must be "credit" or "debit"'
+      });
+    }
+
+    const account = await Account.findOne({ 
+      memberNumber: req.params.id.toUpperCase() 
+    });
+
+    if (!account) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+
+    try {
+      await account.updateBalance(amount, type);
+      res.json({ 
+        message: `Account ${type}ed successfully`, 
+        account,
+        newBalance: account.savings
+      });
+    } catch (balanceError) {
+      return res.status(400).json({ 
+        error: balanceError.message 
+      });
+    }
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to update balance', 
+      details: error.message 
+    });
+  }
+});
+
+// Get account statement/summary
+router.get('/:id/summary', async (req, res) => {
+  try {
+    const account = await Account.findOne({ 
+      memberNumber: req.params.id.toUpperCase() 
+    }).select('-__v');
+    
+    if (!account) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+    
+    // Get user details
+    const user = await User.findOne({ 
+      memberNumber: req.params.id.toUpperCase() 
+    }).select('fname lname email phoneNumber');
+    
+    const summary = {
+      account,
+      user,
+      totalValue: account.totalValue,
+      accountAge: Math.floor((new Date() - account.accountOpenDate) / (1000 * 60 * 60 * 24)),
+      lastActivity: account.lastTransactionDate
+    };
+    
+    res.json(summary);
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch account summary', 
+      details: error.message 
+    });
+  }
+});
+
+module.exports = router;
+const express = require('express');
+const router = express.Router();
+const Admin = require('../models/Admin');
+
+// Admin Login
+router.post('/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    const admin = await Admin.findOne({ username });
+    if (!admin) {
+      return res.status(401).json({ error: 'Admin not found' });
+    }
+
+    const isMatch = await admin.comparePassword(password);
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Invalid password' });
+    }
+
+    res.json({
+      success: true,
+      admin: {
+        id: admin._id,
+        username: admin.username,
+        email: admin.email,
+        role: admin.role
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+module.exports = router;module.exports = {}; 
+const express = require('express');
+const router = express.Router();
+const bcrypt = require('bcryptjs');
+const User = require('../models/users.models');
+
+router.post('/login', async (req, res) => {
+  try {
+    const { memberNumber, password } = req.body;
+
+    if (!memberNumber || !password) {
+      return res.status(400).json({ error: 'Member number and password are required' });
+    }
+
+    const user = await User.findOne({ memberNumber: memberNumber }).select('+password');
+
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    res.json({
+      success: true,
+      user: {
+        id: user._id,
+        memberNumber: user.memberNumber,
+        role: user.role || 'member',
+        fname: user.fname || '',
+        lname: user.lname || '',
+        email: user.email || ''
+      }
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+module.exports = router;const express = require('express');
+const router = express.Router();
+const businessController = require('../controllers/businessController');
+
+router.post('/', businessController.createBusiness);
+router.get('/', businessController.getBusinesses);
+router.get('/:id', businessController.getBusiness);
+router.post('/:id/profit', businessController.addProfit);
+router.post('/:id/loss', businessController.recordLoss);
+router.post('/:id/close', businessController.closeBusiness);
+router.post('/:id/dividends', businessController.distributeDividends);
+
+module.exports = router;
+const express = require('express');
+const router = express.Router();
+const clubCapitalController = require('../controllers/clubCapitalController');
+
+router.get('/', clubCapitalController.getBalance);
+router.get('/transactions', clubCapitalController.getTransactions);
+router.post('/transaction', clubCapitalController.addTransaction);
+
+module.exports = router;
+const express = require('express');
+const router = express.Router();
+const Transaction = require('../models/transactions.models');
+const Account = require('../models/accounts.models');
+const User = require('../models/users.models');
+
+// Get all transactions
+router.get('/', async (req, res) => {
+  try {
+    const { 
+      page = 1, 
+      limit = 10, 
+      memberNumber, 
+      status, 
+      type, 
+      startDate, 
+      endDate,
+      minAmount,
+      maxAmount
+    } = req.query;
+    
+    const query = {};
+    
+    // Filters
+    if (memberNumber) {
+      query.memberNumber = memberNumber.toUpperCase();
+    }
+    
+    if (status) {
+      query.status = status.toLowerCase();
+    }
+    
+    if (type) {
+      query.type = type.toLowerCase();
+    }
+    
+    // Date range filter
+    if (startDate || endDate) {
+      query.date = {};
+      if (startDate) query.date.$gte = new Date(startDate);
+      if (endDate) query.date.$lte = new Date(endDate);
+    }
+    
+    // Amount range filter
+    if (minAmount || maxAmount) {
+      query.amount = {};
+      if (minAmount) query.amount.$gte = parseFloat(minAmount);
+      if (maxAmount) query.amount.$lte = parseFloat(maxAmount);
+    }
+    
+    const transactions = await Transaction.find(query)
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .sort({ date: -1, createdAt: -1 })
+      .select('-__v');
+      
+    const total = await Transaction.countDocuments(query);
+    
+    // Calculate summary statistics
+    const summary = await Transaction.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $sum: '$amount' },
+          completedTransactions: {
+            $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] }
+          },
+          pendingTransactions: {
+            $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] }
+          },
+          totalDeposits: {
+            $sum: { 
+              $cond: [
+                { $and: [
+                  { $eq: ['$type', 'deposit'] },
+                  { $eq: ['$status', 'completed'] }
+                ]}, 
+                '$amount', 
+                0
+              ]
+            }
+          },
+          totalWithdrawals: {
+            $sum: { 
+              $cond: [
+                { $and: [
+                  { $eq: ['$type', 'withdrawal'] },
+                  { $eq: ['$status', 'completed'] }
+                ]}, 
+                '$amount', 
+                0
+              ]
+            }
+          }
+        }
+      }
+    ]);
+    
+    res.json({
+      transactions,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+      totalTransactions: total,
+      summary: summary[0] || {
+        totalAmount: 0,
+        completedTransactions: 0,
+        pendingTransactions: 0,
+        totalDeposits: 0,
+        totalWithdrawals: 0
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch transactions', 
+      details: error.message 
+    });
+  }
+});
+
+// Get transaction by ID
+router.get('/:id', async (req, res) => {
+  try {
+    const transaction = await Transaction.findOne({ 
+      transactionId: req.params.id.toUpperCase() 
+    }).select('-__v');
+    
+    if (!transaction) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    
+    res.json(transaction);
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch transaction', 
+      details: error.message 
+    });
+  }
+});
+
+// Create new transaction
+router.post('/', async (req, res) => {
+  try {
+    const {
+      transactionId,
+      memberNumber,
+      date,
+      type,
+      amount,
+      status,
+      accountBalance,
+      confirmedBy,
+      description,
+      reference,
+      category
+    } = req.body;
+
+    if (!memberNumber || !type || amount == null) {
+      return res.status(400).json({ 
+        error: 'Missing required fields',
+        details: 'memberNumber, type, and amount are required'
+      });
+    }
+
+    // Verify user exists
+    const user = await User.findOne({ 
+      memberNumber: memberNumber.toUpperCase() 
+    });
+    
+    if (!user) {
+      return res.status(400).json({ 
+        error: 'User not found',
+        details: 'Member must be registered first'
+      });
+    }
+
+    // Verify account exists
+    const account = await Account.findOne({ 
+      memberNumber: memberNumber.toUpperCase() 
+    });
+    
+    if (!account) {
+      return res.status(400).json({ 
+        error: 'Account not found',
+        details: 'Account must be created first'
+      });
+    }
+
+    // Generate transaction ID if not provided
+    const finalTransactionId = transactionId || Transaction.generateTransactionId();
+
+    // Check if transaction ID already exists
+    if (transactionId) {
+      const existingTransaction = await Transaction.findOne({ 
+        transactionId: finalTransactionId.toUpperCase() 
+      });
+      
+      if (existingTransaction) {
+        return res.status(400).json({ 
+          error: 'Transaction already exists',
+          details: 'Transaction ID must be unique'
+        });
+      }
+    }
+
+    const newTransaction = new Transaction({
+      transactionId: finalTransactionId,
+      memberNumber,
+      date: date || new Date(),
+      type,
+      amount,
+      status: status || 'pending',
+      accountBalance: accountBalance || account.savings,
+      confirmedBy,
+      description,
+      reference,
+      category
+    });
+
+    const savedTransaction = await newTransaction.save();
+    
+    // Update account balance if transaction is completed
+    if (savedTransaction.status === 'completed') {
+      if (type === 'deposit' || type === 'contribution') {
+        await account.updateBalance(amount, 'credit');
+      } else if (type === 'withdrawal') {
+        await account.updateBalance(amount, 'debit');
+      }
+    }
+
+    res.status(201).json(savedTransaction);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        details: errors 
+      });
+    }
+    res.status(500).json({ 
+      error: 'Failed to create transaction', 
+      details: error.message 
+    });
+  }
+});
+
+// Update transaction
+router.put('/:id', async (req, res) => {
+  try {
+    const { 
+      memberNumber, 
+      date, 
+      type, 
+      amount, 
+      status, 
+      accountBalance, 
+      confirmedBy,
+      description,
+      reference,
+      category
+    } = req.body;
+    
+    const transaction = await Transaction.findOne({ 
+      transactionId: req.params.id.toUpperCase() 
+    });
+    
+    if (!transaction) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    
+    // Store old values for balance adjustment
+    const oldStatus = transaction.status;
+    const oldAmount = transaction.amount;
+    const oldType = transaction.type;
+    
+    const updatedTransaction = await Transaction.findOneAndUpdate(
+      { transactionId: req.params.id.toUpperCase() },
+      {
+        memberNumber,
+        date,
+        type,
+        amount,
+        status,
+        accountBalance,
+        confirmedBy,
+        description,
+        reference,
+        category
+      },
+      { 
+        new: true, 
+        runValidators: true,
+        omitUndefined: true
+      }
+    ).select('-__v');
+
+    // Update account balance if status changed to completed
+    if (updatedTransaction.memberNumber) {
+      const account = await Account.findOne({ 
+        memberNumber: updatedTransaction.memberNumber.toUpperCase() 
+      });
+      
+      if (account) {
+        // Reverse old transaction if it was completed
+        if (oldStatus === 'completed') {
+          if (oldType === 'deposit' || oldType === 'contribution') {
+            await account.updateBalance(oldAmount, 'debit');
+          } else if (oldType === 'withdrawal') {
+            await account.updateBalance(oldAmount, 'credit');
+          }
+        }
+        
+        // Apply new transaction if completed
+        if (updatedTransaction.status === 'completed') {
+          if (updatedTransaction.type === 'deposit' || updatedTransaction.type === 'contribution') {
+            await account.updateBalance(updatedTransaction.amount, 'credit');
+          } else if (updatedTransaction.type === 'withdrawal') {
+            await account.updateBalance(updatedTransaction.amount, 'debit');
+          }
+        }
+      }
+    }
+
+    res.json(updatedTransaction);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        details: errors 
+      });
+    }
+    res.status(500).json({ 
+      error: 'Failed to update transaction', 
+      details: error.message 
+    });
+  }
+});
+
+// Delete transaction
+router.delete('/:id', async (req, res) => {
+  try {
+    const transaction = await Transaction.findOne({ 
+      transactionId: req.params.id.toUpperCase() 
+    });
+    
+    if (!transaction) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    
+    // Reverse transaction if it was completed
+    if (transaction.status === 'completed') {
+      const account = await Account.findOne({ 
+        memberNumber: transaction.memberNumber 
+      });
+      
+      if (account) {
+        if (transaction.type === 'deposit' || transaction.type === 'contribution') {
+          await account.updateBalance(transaction.amount, 'debit');
+        } else if (transaction.type === 'withdrawal') {
+          await account.updateBalance(transaction.amount, 'credit');
+        }
+      }
+    }
+    
+    const deletedTransaction = await Transaction.findOneAndDelete({ 
+      transactionId: req.params.id.toUpperCase() 
+    });
+
+    res.json({ 
+      message: 'Transaction deleted successfully', 
+      transaction: deletedTransaction 
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to delete transaction', 
+      details: error.message 
+    });
+  }
+});
+
+// Complete/approve transaction
+router.patch('/:id/complete', async (req, res) => {
+  try {
+    const { confirmedBy } = req.body;
+    
+    const transaction = await Transaction.findOne({ 
+      transactionId: req.params.id.toUpperCase() 
+    });
+    
+    if (!transaction) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    
+    if (transaction.status === 'completed') {
+      return res.status(400).json({ 
+        error: 'Transaction already completed' 
+      });
+    }
+    
+    // Update account balance
+    const account = await Account.findOne({ 
+      memberNumber: transaction.memberNumber 
+    });
+    
+    if (!account) {
+      return res.status(400).json({ 
+        error: 'Account not found' 
+      });
+    }
+    
+    try {
+      if (transaction.type === 'deposit' || transaction.type === 'contribution') {
+        await account.updateBalance(transaction.amount, 'credit');
+      } else if (transaction.type === 'withdrawal') {
+        await account.updateBalance(transaction.amount, 'debit');
+      }
+      
+      await transaction.complete(confirmedBy);
+      
+      res.json({ 
+        message: 'Transaction completed successfully', 
+        transaction,
+        newAccountBalance: account.savings
+      });
+    } catch (balanceError) {
+      return res.status(400).json({ 
+        error: balanceError.message 
+      });
+    }
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to complete transaction', 
+      details: error.message 
+    });
+  }
+});
+
+// Get transactions by member number
+router.get('/member/:memberNumber', async (req, res) => {
+  try {
+    const { page = 1, limit = 10, status, type } = req.query;
+    const query = { memberNumber: req.params.memberNumber.toUpperCase() };
+    
+    if (status) query.status = status.toLowerCase();
+    if (type) query.type = type.toLowerCase();
+    
+    const transactions = await Transaction.find(query)
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .sort({ date: -1 })
+      .select('-__v');
+      
+    const total = await Transaction.countDocuments(query);
+    
+    res.json({
+      transactions,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+      totalTransactions: total
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch member transactions', 
+      details: error.message 
+    });
+  }
+});
+
+module.exports = router;
+const express = require('express');
+const router = express.Router();
+const dividendController = require('../controllers/dividendController');
+
+router.get('/', dividendController.getAllDividends);
+router.get('/settings', dividendController.getDividendSettings);
+router.put('/settings', dividendController.updateDividendSettings);
+router.get('/:id', dividendController.getDividend);
+router.get('/member/:memberId', dividendController.getMemberDividends);
+
+module.exports = router;const express = require('express');
+const router = express.Router();
+const Account = require('../models/accounts.models');
+const User = require('../models/users.models');
+
+// Get all accounts
+router.get('/', async (req, res) => {
+  try {
+    const { page = 1, limit = 10, status, search } = req.query;
+    const query = {};
+    
+    // Status filter
+    if (status) {
+      query.accountStatus = status.toLowerCase();
+    }
+    
+    // Search functionality
+    if (search) {
+      query.memberNumber = { $regex: search, $options: 'i' };
+    }
+    
+    const accounts = await Account.find(query)
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .sort({ createdAt: -1 })
+      .select('-__v');
+      
+    const total = await Account.countDocuments(query);
+    
+    // Calculate summary statistics
+    const summary = await Account.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: null,
+          totalSavings: { $sum: '$savings' },
+          totalShares: { $sum: '$sharesOwned' },
+          totalContributions: { $sum: '$monthlyContribution' },
+          activeAccounts: {
+            $sum: { $cond: [{ $eq: ['$accountStatus', 'active'] }, 1, 0] }
+          }
+        }
+      }
+    ]);
+    
+    res.json({
+      accounts,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+      totalAccounts: total,
+      summary: summary[0] || {
+        totalSavings: 0,
+        totalShares: 0,
+        totalContributions: 0,
+        activeAccounts: 0
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch accounts', 
+      details: error.message 
+    });
+  }
+});
+
+// Get account by member number
+router.get('/:id', async (req, res) => {
+  try {
+    const account = await Account.findOne({ 
+      memberNumber: req.params.id.toUpperCase() 
+    }).select('-__v');
+    
+    if (!account) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+    
+    res.json(account);
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch account', 
+      details: error.message 
+    });
+  }
+});
+
+// Create a new account
+router.post('/', async (req, res) => {
+  try {
+    const { memberNumber, savings, monthlyContribution, sharesOwned, accountStatus, notes } = req.body;
+
+    if (!memberNumber) {
+      return res.status(400).json({ error: 'Member number is required' });
+    }
+
+    // Check if user exists
+    const user = await User.findOne({ 
+      memberNumber: memberNumber.toUpperCase() 
+    });
+    
+    if (!user) {
+      return res.status(400).json({ 
+        error: 'User not found', 
+        details: 'Member must be registered as a user first' 
+      });
+    }
+
+    // Check if account already exists
+    const existingAccount = await Account.findOne({ 
+      memberNumber: memberNumber.toUpperCase() 
+    });
+    
+    if (existingAccount) {
+      return res.status(400).json({ 
+        error: 'Account already exists', 
+        details: 'Account for this member number already exists' 
+      });
+    }
+
+    const newAccount = new Account({
+      memberNumber,
+      savings: savings || 0,
+      monthlyContribution: monthlyContribution || 0,
+      sharesOwned: sharesOwned || 0,
+      accountStatus: accountStatus || 'pending',
+      notes
+    });
+
+    const savedAccount = await newAccount.save();
+    res.status(201).json(savedAccount);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        details: errors 
+      });
+    }
+    res.status(500).json({ 
+      error: 'Failed to create account', 
+      details: error.message 
+    });
+  }
+});
+
+// Update account
+router.put('/:id', async (req, res) => {
+  try {
+    const { savings, monthlyContribution, sharesOwned, accountStatus, notes } = req.body;
+    
+    const updatedAccount = await Account.findOneAndUpdate(
+      { memberNumber: req.params.id.toUpperCase() },
+      {
+        savings,
+        monthlyContribution,
+        sharesOwned,
+        accountStatus,
+        notes,
+        lastTransactionDate: new Date()
+      },
+      { 
+        new: true, 
+        runValidators: true,
+        omitUndefined: true
+      }
+    ).select('-__v');
+
+    if (!updatedAccount) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+
+    res.json(updatedAccount);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        details: errors 
+      });
+    }
+    res.status(500).json({ 
+      error: 'Failed to update account', 
+      details: error.message 
+    });
+  }
+});
+
+// Delete account
+router.delete('/:id', async (req, res) => {
+  try {
+    const deletedAccount = await Account.findOneAndDelete({ 
+      memberNumber: req.params.id.toUpperCase() 
+    });
+
+    if (!deletedAccount) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+
+    res.json({ 
+      message: 'Account deleted successfully', 
+      account: deletedAccount 
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to delete account', 
+      details: error.message 
+    });
+  }
+});
+
+// Update account balance (credit/debit)
+router.patch('/:id/balance', async (req, res) => {
+  try {
+    const { amount, type, description } = req.body;
+    
+    if (!amount || !type) {
+      return res.status(400).json({ 
+        error: 'Amount and type are required',
+        details: 'Type must be "credit" or "debit"'
+      });
+    }
+    
+    if (type !== 'credit' && type !== 'debit') {
+      return res.status(400).json({ 
+        error: 'Invalid transaction type',
+        details: 'Type must be "credit" or "debit"'
+      });
+    }
+
+    const account = await Account.findOne({ 
+      memberNumber: req.params.id.toUpperCase() 
+    });
+
+    if (!account) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+
+    try {
+      await account.updateBalance(amount, type);
+      res.json({ 
+        message: `Account ${type}ed successfully`, 
+        account,
+        newBalance: account.savings
+      });
+    } catch (balanceError) {
+      return res.status(400).json({ 
+        error: balanceError.message 
+      });
+    }
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to update balance', 
+      details: error.message 
+    });
+  }
+});
+
+// Get account statement/summary
+router.get('/:id/summary', async (req, res) => {
+  try {
+    const account = await Account.findOne({ 
+      memberNumber: req.params.id.toUpperCase() 
+    }).select('-__v');
+    
+    if (!account) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+    
+    // Get user details
+    const user = await User.findOne({ 
+      memberNumber: req.params.id.toUpperCase() 
+    }).select('fname lname email phoneNumber');
+    
+    const summary = {
+      account,
+      user,
+      totalValue: account.totalValue,
+      accountAge: Math.floor((new Date() - account.accountOpenDate) / (1000 * 60 * 60 * 24)),
+      lastActivity: account.lastTransactionDate
+    };
+    
+    res.json(summary);
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch account summary', 
+      details: error.message 
+    });
+  }
+});
+
+module.exports = router;
+const express = require('express');
+const router = express.Router();
+const Transaction = require('../models/transactions.models');
+const Account = require('../models/accounts.models');
+const User = require('../models/users.models');
+
+// Get all transactions
+router.get('/', async (req, res) => {
+  try {
+    const { 
+      page = 1, 
+      limit = 10, 
+      memberNumber, 
+      status, 
+      type, 
+      startDate, 
+      endDate,
+      minAmount,
+      maxAmount
+    } = req.query;
+    
+    const query = {};
+    
+    // Filters
+    if (memberNumber) {
+      query.memberNumber = memberNumber.toUpperCase();
+    }
+    
+    if (status) {
+      query.status = status.toLowerCase();
+    }
+    
+    if (type) {
+      query.type = type.toLowerCase();
+    }
+    
+    // Date range filter
+    if (startDate || endDate) {
+      query.date = {};
+      if (startDate) query.date.$gte = new Date(startDate);
+      if (endDate) query.date.$lte = new Date(endDate);
+    }
+    
+    // Amount range filter
+    if (minAmount || maxAmount) {
+      query.amount = {};
+      if (minAmount) query.amount.$gte = parseFloat(minAmount);
+      if (maxAmount) query.amount.$lte = parseFloat(maxAmount);
+    }
+    
+    const transactions = await Transaction.find(query)
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .sort({ date: -1, createdAt: -1 })
+      .select('-__v');
+      
+    const total = await Transaction.countDocuments(query);
+    
+    // Calculate summary statistics
+    const summary = await Transaction.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $sum: '$amount' },
+          completedTransactions: {
+            $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] }
+          },
+          pendingTransactions: {
+            $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] }
+          },
+          totalDeposits: {
+            $sum: { 
+              $cond: [
+                { $and: [
+                  { $eq: ['$type', 'deposit'] },
+                  { $eq: ['$status', 'completed'] }
+                ]}, 
+                '$amount', 
+                0
+              ]
+            }
+          },
+          totalWithdrawals: {
+            $sum: { 
+              $cond: [
+                { $and: [
+                  { $eq: ['$type', 'withdrawal'] },
+                  { $eq: ['$status', 'completed'] }
+                ]}, 
+                '$amount', 
+                0
+              ]
+            }
+          }
+        }
+      }
+    ]);
+    
+    res.json({
+      transactions,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+      totalTransactions: total,
+      summary: summary[0] || {
+        totalAmount: 0,
+        completedTransactions: 0,
+        pendingTransactions: 0,
+        totalDeposits: 0,
+        totalWithdrawals: 0
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch transactions', 
+      details: error.message 
+    });
+  }
+});
+
+// Get transaction by ID
+router.get('/:id', async (req, res) => {
+  try {
+    const transaction = await Transaction.findOne({ 
+      transactionId: req.params.id.toUpperCase() 
+    }).select('-__v');
+    
+    if (!transaction) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    
+    res.json(transaction);
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch transaction', 
+      details: error.message 
+    });
+  }
+});
+
+// Create new transaction
+router.post('/', async (req, res) => {
+  try {
+    const {
+      transactionId,
+      memberNumber,
+      date,
+      type,
+      amount,
+      status,
+      accountBalance,
+      confirmedBy,
+      description,
+      reference,
+      category
+    } = req.body;
+
+    if (!memberNumber || !type || amount == null) {
+      return res.status(400).json({ 
+        error: 'Missing required fields',
+        details: 'memberNumber, type, and amount are required'
+      });
+    }
+
+    // Verify user exists
+    const user = await User.findOne({ 
+      memberNumber: memberNumber.toUpperCase() 
+    });
+    
+    if (!user) {
+      return res.status(400).json({ 
+        error: 'User not found',
+        details: 'Member must be registered first'
+      });
+    }
+
+    // Verify account exists
+    const account = await Account.findOne({ 
+      memberNumber: memberNumber.toUpperCase() 
+    });
+    
+    if (!account) {
+      return res.status(400).json({ 
+        error: 'Account not found',
+        details: 'Account must be created first'
+      });
+    }
+
+    // Generate transaction ID if not provided
+    const finalTransactionId = transactionId || Transaction.generateTransactionId();
+
+    // Check if transaction ID already exists
+    if (transactionId) {
+      const existingTransaction = await Transaction.findOne({ 
+        transactionId: finalTransactionId.toUpperCase() 
+      });
+      
+      if (existingTransaction) {
+        return res.status(400).json({ 
+          error: 'Transaction already exists',
+          details: 'Transaction ID must be unique'
+        });
+      }
+    }
+
+    const newTransaction = new Transaction({
+      transactionId: finalTransactionId,
+      memberNumber,
+      date: date || new Date(),
+      type,
+      amount,
+      status: status || 'pending',
+      accountBalance: accountBalance || account.savings,
+      confirmedBy,
+      description,
+      reference,
+      category
+    });
+
+    const savedTransaction = await newTransaction.save();
+    
+    // Update account balance if transaction is completed
+    if (savedTransaction.status === 'completed') {
+      if (type === 'deposit' || type === 'contribution') {
+        await account.updateBalance(amount, 'credit');
+      } else if (type === 'withdrawal') {
+        await account.updateBalance(amount, 'debit');
+      }
+    }
+
+    res.status(201).json(savedTransaction);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        details: errors 
+      });
+    }
+    res.status(500).json({ 
+      error: 'Failed to create transaction', 
+      details: error.message 
+    });
+  }
+});
+
+// Update transaction
+router.put('/:id', async (req, res) => {
+  try {
+    const { 
+      memberNumber, 
+      date, 
+      type, 
+      amount, 
+      status, 
+      accountBalance, 
+      confirmedBy,
+      description,
+      reference,
+      category
+    } = req.body;
+    
+    const transaction = await Transaction.findOne({ 
+      transactionId: req.params.id.toUpperCase() 
+    });
+    
+    if (!transaction) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    
+    // Store old values for balance adjustment
+    const oldStatus = transaction.status;
+    const oldAmount = transaction.amount;
+    const oldType = transaction.type;
+    
+    const updatedTransaction = await Transaction.findOneAndUpdate(
+      { transactionId: req.params.id.toUpperCase() },
+      {
+        memberNumber,
+        date,
+        type,
+        amount,
+        status,
+        accountBalance,
+        confirmedBy,
+        description,
+        reference,
+        category
+      },
+      { 
+        new: true, 
+        runValidators: true,
+        omitUndefined: true
+      }
+    ).select('-__v');
+
+    // Update account balance if status changed to completed
+    if (updatedTransaction.memberNumber) {
+      const account = await Account.findOne({ 
+        memberNumber: updatedTransaction.memberNumber.toUpperCase() 
+      });
+      
+      if (account) {
+        // Reverse old transaction if it was completed
+        if (oldStatus === 'completed') {
+          if (oldType === 'deposit' || oldType === 'contribution') {
+            await account.updateBalance(oldAmount, 'debit');
+          } else if (oldType === 'withdrawal') {
+            await account.updateBalance(oldAmount, 'credit');
+          }
+        }
+        
+        // Apply new transaction if completed
+        if (updatedTransaction.status === 'completed') {
+          if (updatedTransaction.type === 'deposit' || updatedTransaction.type === 'contribution') {
+            await account.updateBalance(updatedTransaction.amount, 'credit');
+          } else if (updatedTransaction.type === 'withdrawal') {
+            await account.updateBalance(updatedTransaction.amount, 'debit');
+          }
+        }
+      }
+    }
+
+    res.json(updatedTransaction);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        details: errors 
+      });
+    }
+    res.status(500).json({ 
+      error: 'Failed to update transaction', 
+      details: error.message 
+    });
+  }
+});
+
+// Delete transaction
+router.delete('/:id', async (req, res) => {
+  try {
+    const transaction = await Transaction.findOne({ 
+      transactionId: req.params.id.toUpperCase() 
+    });
+    
+    if (!transaction) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    
+    // Reverse transaction if it was completed
+    if (transaction.status === 'completed') {
+      const account = await Account.findOne({ 
+        memberNumber: transaction.memberNumber 
+      });
+      
+      if (account) {
+        if (transaction.type === 'deposit' || transaction.type === 'contribution') {
+          await account.updateBalance(transaction.amount, 'debit');
+        } else if (transaction.type === 'withdrawal') {
+          await account.updateBalance(transaction.amount, 'credit');
+        }
+      }
+    }
+    
+    const deletedTransaction = await Transaction.findOneAndDelete({ 
+      transactionId: req.params.id.toUpperCase() 
+    });
+
+    res.json({ 
+      message: 'Transaction deleted successfully', 
+      transaction: deletedTransaction 
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to delete transaction', 
+      details: error.message 
+    });
+  }
+});
+
+// Complete/approve transaction
+router.patch('/:id/complete', async (req, res) => {
+  try {
+    const { confirmedBy } = req.body;
+    
+    const transaction = await Transaction.findOne({ 
+      transactionId: req.params.id.toUpperCase() 
+    });
+    
+    if (!transaction) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    
+    if (transaction.status === 'completed') {
+      return res.status(400).json({ 
+        error: 'Transaction already completed' 
+      });
+    }
+    
+    // Update account balance
+    const account = await Account.findOne({ 
+      memberNumber: transaction.memberNumber 
+    });
+    
+    if (!account) {
+      return res.status(400).json({ 
+        error: 'Account not found' 
+      });
+    }
+    
+    try {
+      if (transaction.type === 'deposit' || transaction.type === 'contribution') {
+        await account.updateBalance(transaction.amount, 'credit');
+      } else if (transaction.type === 'withdrawal') {
+        await account.updateBalance(transaction.amount, 'debit');
+      }
+      
+      await transaction.complete(confirmedBy);
+      
+      res.json({ 
+        message: 'Transaction completed successfully', 
+        transaction,
+        newAccountBalance: account.savings
+      });
+    } catch (balanceError) {
+      return res.status(400).json({ 
+        error: balanceError.message 
+      });
+    }
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to complete transaction', 
+      details: error.message 
+    });
+  }
+});
+
+// Get transactions by member number
+router.get('/member/:memberNumber', async (req, res) => {
+  try {
+    const { page = 1, limit = 10, status, type } = req.query;
+    const query = { memberNumber: req.params.memberNumber.toUpperCase() };
+    
+    if (status) query.status = status.toLowerCase();
+    if (type) query.type = type.toLowerCase();
+    
+    const transactions = await Transaction.find(query)
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .sort({ date: -1 })
+      .select('-__v');
+      
+    const total = await Transaction.countDocuments(query);
+    
+    res.json({
+      transactions,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+      totalTransactions: total
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch member transactions', 
+      details: error.message 
+    });
+  }
+});
+
+module.exports = router;
+const express = require('express');
+const router = express.Router();
+const loanController = require('../controllers/loanController');
+
+// Eligibility
+router.get('/eligibility/:memberId/:type', loanController.getEligibility);
+
+// Apply
+router.post('/apply', loanController.applyLoan);
+router.post('/admin-apply', loanController.adminApplyLoan);
+
+// Get all loans
+router.get('/', loanController.getAllLoans);
+
+// Download documents
+router.get('/:id/schedule', loanController.getRepaymentSchedule);
+router.get('/:id/statement', loanController.getLoanStatement);
+
+// Get single loan with schedule
+router.get('/:id', loanController.getLoanWithSchedule);
+
+// Update status
+router.put('/:id/status', loanController.updateLoanStatus);
+
+// Record repayment
+router.put('/repayment/:installmentId', loanController.recordRepayment);
+
+module.exports = router;const express = require('express');
+const router = express.Router();
+const User = require('../models/users.models');
+const { adminOnly, restrictToOwner } = require('../middleware/auth');
+
+// Get all users
+router.get('/', adminOnly, async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search, status } = req.query;
+    const query = {};
+    
+    // Search functionality
+    if (search) {
+      query.$or = [
+        { fname: { $regex: search, $options: 'i' } },
+        { lname: { $regex: search, $options: 'i' } },
+        { memberNumber: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    // Status filter
+    if (status !== undefined) {
+      query.isActive = status === 'true';
+    }
+    
+    const users = await User.find(query)
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .sort({ createdAt: -1 })
+      .select('-__v');
+      
+    const total = await User.countDocuments(query);
+    
+    res.json({
+      users,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+      totalUsers: total
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch users', 
+      details: error.message 
+    });
+  }
+});
+
+// Get user by member number
+router.get('/:id', restrictToOwner, async (req, res) => {
+  try {
+    const user = await User.findOne({ memberNumber: req.params.id.toUpperCase() })
+      .select('-__v');
+      
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch user', 
+      details: error.message 
+    });
+  }
+});
+
+// Create new user
+router.post('/',adminOnly, async (req, res) => {
+  try {
+    const { memberNumber, fname, lname, email, phoneNumber, dateJoined, emergencyContacts } = req.body;
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ 
+      $or: [
+        { memberNumber: memberNumber?.toUpperCase() },
+        { email: email?.toLowerCase() }
+      ]
+    });
+    
+    if (existingUser) {
+      return res.status(400).json({ 
+        error: 'User already exists', 
+        details: 'Member number or email already in use' 
+      });
+    }
+
+    const newUser = new User({
+      memberNumber,
+      fname,
+      lname,
+      email,
+      phoneNumber,
+      dateJoined,
+      emergencyContacts
+    });
+
+    const savedUser = await newUser.save();
+    res.status(201).json(savedUser);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        details: errors 
+      });
+    }
+    res.status(500).json({ 
+      error: 'Failed to create user', 
+      details: error.message 
+    });
+  }
+});
+
+// Update user by member number
+router.put('/:id',restrictToOwner, async (req, res) => {
+  try {
+    const { fname, lname, email, phoneNumber, dateJoined, emergencyContacts, isActive } = req.body;
+    
+    const updatedUser = await User.findOneAndUpdate(
+      { memberNumber: req.params.id.toUpperCase() },
+      {
+        fname,
+        lname,
+        email,
+        phoneNumber,
+        dateJoined,
+        emergencyContacts,
+        isActive
+      },
+      { 
+        new: true, 
+        runValidators: true,
+        omitUndefined: true // Only update provided fields
+      }
+    ).select('-__v');
+
+    if (!updatedUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json(updatedUser);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        details: errors 
+      });
+    }
+    res.status(500).json({ 
+      error: 'Failed to update user', 
+      details: error.message 
+    });
+  }
+});
+
+// Delete user by member number (soft delete)
+router.delete('/:id',adminOnly, async (req, res) => {
+  try {
+    const user = await User.findOneAndUpdate(
+      { memberNumber: req.params.id.toUpperCase() },
+      { isActive: false },
+      { new: true }
+    ).select('-__v');
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ 
+      message: 'User deactivated successfully', 
+      user 
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to delete user', 
+      details: error.message 
+    });
+  }
+});
+
+// Permanently delete user
+router.delete('/:id/permanent',adminOnly, async (req, res) => {
+  try {
+    const deletedUser = await User.findOneAndDelete({ 
+      memberNumber: req.params.id.toUpperCase() 
+    });
+
+    if (!deletedUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ 
+      message: 'User permanently deleted', 
+      user: deletedUser 
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to permanently delete user', 
+      details: error.message 
+    });
+  }
+});
+
+// Restore deactivated user
+router.patch('/:id/restore',adminOnly, async (req, res) => {
+  try {
+    const user = await User.findOneAndUpdate(
+      { memberNumber: req.params.id.toUpperCase() },
+      { isActive: true },
+      { new: true }
+    ).select('-__v');
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ 
+      message: 'User restored successfully', 
+      user 
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to restore user', 
+      details: error.message 
+    });
+  }
+});
+
+module.exports = router;
+const express = require('express');
+const router = express.Router();
+const memberController = require('../controllers/memberController');
+
+router.get('/generate-password', memberController.generatePassword);
+router.post('/', memberController.createMember);
+router.get('/', memberController.getAllMembers);
+router.get('/:id', memberController.getMemberById);
+router.put('/:id', memberController.updateMember);
+router.delete('/:id', memberController.deleteMember);
+router.put('/:id/change-password', memberController.changePassword);
+
+module.exports = router;
+const express = require('express');
+const router = express.Router();
+const reportController = require('../controllers/reportController');
+
+router.get('/club-summary', reportController.getClubSummary);
+router.get('/member/:id', reportController.getMemberReport);
+router.get('/loans', reportController.getLoanReport);
+router.get('/dividends', reportController.getDividendReport);
+router.get('/business', reportController.getBusinessReport);
+
+module.exports = router;const express = require('express');
+const router = express.Router();
+const Account = require('../models/accounts.models');
+const User = require('../models/users.models');
+
+// Get all accounts
+router.get('/', async (req, res) => {
+  try {
+    const { page = 1, limit = 10, status, search } = req.query;
+    const query = {};
+    
+    // Status filter
+    if (status) {
+      query.accountStatus = status.toLowerCase();
+    }
+    
+    // Search functionality
+    if (search) {
+      query.memberNumber = { $regex: search, $options: 'i' };
+    }
+    
+    const accounts = await Account.find(query)
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .sort({ createdAt: -1 })
+      .select('-__v');
+      
+    const total = await Account.countDocuments(query);
+    
+    // Calculate summary statistics
+    const summary = await Account.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: null,
+          totalSavings: { $sum: '$savings' },
+          totalShares: { $sum: '$sharesOwned' },
+          totalContributions: { $sum: '$monthlyContribution' },
+          activeAccounts: {
+            $sum: { $cond: [{ $eq: ['$accountStatus', 'active'] }, 1, 0] }
+          }
+        }
+      }
+    ]);
+    
+    res.json({
+      accounts,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+      totalAccounts: total,
+      summary: summary[0] || {
+        totalSavings: 0,
+        totalShares: 0,
+        totalContributions: 0,
+        activeAccounts: 0
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch accounts', 
+      details: error.message 
+    });
+  }
+});
+
+// Get account by member number
+router.get('/:id', async (req, res) => {
+  try {
+    const account = await Account.findOne({ 
+      memberNumber: req.params.id.toUpperCase() 
+    }).select('-__v');
+    
+    if (!account) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+    
+    res.json(account);
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch account', 
+      details: error.message 
+    });
+  }
+});
+
+// Create a new account
+router.post('/', async (req, res) => {
+  try {
+    const { memberNumber, savings, monthlyContribution, sharesOwned, accountStatus, notes } = req.body;
+
+    if (!memberNumber) {
+      return res.status(400).json({ error: 'Member number is required' });
+    }
+
+    // Check if user exists
+    const user = await User.findOne({ 
+      memberNumber: memberNumber.toUpperCase() 
+    });
+    
+    if (!user) {
+      return res.status(400).json({ 
+        error: 'User not found', 
+        details: 'Member must be registered as a user first' 
+      });
+    }
+
+    // Check if account already exists
+    const existingAccount = await Account.findOne({ 
+      memberNumber: memberNumber.toUpperCase() 
+    });
+    
+    if (existingAccount) {
+      return res.status(400).json({ 
+        error: 'Account already exists', 
+        details: 'Account for this member number already exists' 
+      });
+    }
+
+    const newAccount = new Account({
+      memberNumber,
+      savings: savings || 0,
+      monthlyContribution: monthlyContribution || 0,
+      sharesOwned: sharesOwned || 0,
+      accountStatus: accountStatus || 'pending',
+      notes
+    });
+
+    const savedAccount = await newAccount.save();
+    res.status(201).json(savedAccount);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        details: errors 
+      });
+    }
+    res.status(500).json({ 
+      error: 'Failed to create account', 
+      details: error.message 
+    });
+  }
+});
+
+// Update account
+router.put('/:id', async (req, res) => {
+  try {
+    const { savings, monthlyContribution, sharesOwned, accountStatus, notes } = req.body;
+    
+    const updatedAccount = await Account.findOneAndUpdate(
+      { memberNumber: req.params.id.toUpperCase() },
+      {
+        savings,
+        monthlyContribution,
+        sharesOwned,
+        accountStatus,
+        notes,
+        lastTransactionDate: new Date()
+      },
+      { 
+        new: true, 
+        runValidators: true,
+        omitUndefined: true
+      }
+    ).select('-__v');
+
+    if (!updatedAccount) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+
+    res.json(updatedAccount);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        details: errors 
+      });
+    }
+    res.status(500).json({ 
+      error: 'Failed to update account', 
+      details: error.message 
+    });
+  }
+});
+
+// Delete account
+router.delete('/:id', async (req, res) => {
+  try {
+    const deletedAccount = await Account.findOneAndDelete({ 
+      memberNumber: req.params.id.toUpperCase() 
+    });
+
+    if (!deletedAccount) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+
+    res.json({ 
+      message: 'Account deleted successfully', 
+      account: deletedAccount 
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to delete account', 
+      details: error.message 
+    });
+  }
+});
+
+// Update account balance (credit/debit)
+router.patch('/:id/balance', async (req, res) => {
+  try {
+    const { amount, type, description } = req.body;
+    
+    if (!amount || !type) {
+      return res.status(400).json({ 
+        error: 'Amount and type are required',
+        details: 'Type must be "credit" or "debit"'
+      });
+    }
+    
+    if (type !== 'credit' && type !== 'debit') {
+      return res.status(400).json({ 
+        error: 'Invalid transaction type',
+        details: 'Type must be "credit" or "debit"'
+      });
+    }
+
+    const account = await Account.findOne({ 
+      memberNumber: req.params.id.toUpperCase() 
+    });
+
+    if (!account) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+
+    try {
+      await account.updateBalance(amount, type);
+      res.json({ 
+        message: `Account ${type}ed successfully`, 
+        account,
+        newBalance: account.savings
+      });
+    } catch (balanceError) {
+      return res.status(400).json({ 
+        error: balanceError.message 
+      });
+    }
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to update balance', 
+      details: error.message 
+    });
+  }
+});
+
+// Get account statement/summary
+router.get('/:id/summary', async (req, res) => {
+  try {
+    const account = await Account.findOne({ 
+      memberNumber: req.params.id.toUpperCase() 
+    }).select('-__v');
+    
+    if (!account) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+    
+    // Get user details
+    const user = await User.findOne({ 
+      memberNumber: req.params.id.toUpperCase() 
+    }).select('fname lname email phoneNumber');
+    
+    const summary = {
+      account,
+      user,
+      totalValue: account.totalValue,
+      accountAge: Math.floor((new Date() - account.accountOpenDate) / (1000 * 60 * 60 * 24)),
+      lastActivity: account.lastTransactionDate
+    };
+    
+    res.json(summary);
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch account summary', 
+      details: error.message 
+    });
+  }
+});
+
+module.exports = router;
+module.exports = {}; 
+const express = require('express');
+const router = express.Router();
+const savingController = require('../controllers/savingController');
+
+// Savings
+router.post('/add', savingController.addSaving);
+router.get('/', savingController.getAllSavings);
+router.get('/summary', savingController.getSummary);
+router.get('/members', savingController.getMemberSavingsList);
+
+// Settings
+router.post('/settings/agreed-monthly', savingController.setAgreedMonthly);
+router.post('/settings/membership-fee', savingController.setMembershipFee);
+router.get('/settings', savingController.getSettings);
+
+// PDFs
+router.get('/member-statement/:memberId', savingController.downloadMemberStatement);
+router.get('/club-capital-report', savingController.downloadClubCapitalReport);
+router.get('/general-report', savingController.downloadGeneralReport);
+
+module.exports = router;
+const express = require('express');
+const router = express.Router();
+const settingController = require('../controllers/settingController');
+
+router.get('/', settingController.getSettings);
+router.put('/', settingController.updateSettings);
+
+module.exports = router;const express = require('express');
+const router = express.Router();
+const settingController = require('../controllers/settingController');
+
+// Loan settings
+router.get('/', settingController.getSettings);
+router.put('/', settingController.updateSettings);
+
+// Share settings
+router.get('/shares', settingController.getShareSettings);
+router.put('/shares', settingController.updateShareSettings);
+
+module.exports = router;const express = require('express');
+const router = express.Router();
+const Transaction = require('../models/transactions.models');
+const Account = require('../models/accounts.models');
+const User = require('../models/users.models');
+
+// Get all transactions
+router.get('/', async (req, res) => {
+  try {
+    const { 
+      page = 1, 
+      limit = 10, 
+      memberNumber, 
+      status, 
+      type, 
+      startDate, 
+      endDate,
+      minAmount,
+      maxAmount
+    } = req.query;
+    
+    const query = {};
+    
+    // Filters
+    if (memberNumber) {
+      query.memberNumber = memberNumber.toUpperCase();
+    }
+    
+    if (status) {
+      query.status = status.toLowerCase();
+    }
+    
+    if (type) {
+      query.type = type.toLowerCase();
+    }
+    
+    // Date range filter
+    if (startDate || endDate) {
+      query.date = {};
+      if (startDate) query.date.$gte = new Date(startDate);
+      if (endDate) query.date.$lte = new Date(endDate);
+    }
+    
+    // Amount range filter
+    if (minAmount || maxAmount) {
+      query.amount = {};
+      if (minAmount) query.amount.$gte = parseFloat(minAmount);
+      if (maxAmount) query.amount.$lte = parseFloat(maxAmount);
+    }
+    
+    const transactions = await Transaction.find(query)
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .sort({ date: -1, createdAt: -1 })
+      .select('-__v');
+      
+    const total = await Transaction.countDocuments(query);
+    
+    // Calculate summary statistics
+    const summary = await Transaction.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $sum: '$amount' },
+          completedTransactions: {
+            $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] }
+          },
+          pendingTransactions: {
+            $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] }
+          },
+          totalDeposits: {
+            $sum: { 
+              $cond: [
+                { $and: [
+                  { $eq: ['$type', 'deposit'] },
+                  { $eq: ['$status', 'completed'] }
+                ]}, 
+                '$amount', 
+                0
+              ]
+            }
+          },
+          totalWithdrawals: {
+            $sum: { 
+              $cond: [
+                { $and: [
+                  { $eq: ['$type', 'withdrawal'] },
+                  { $eq: ['$status', 'completed'] }
+                ]}, 
+                '$amount', 
+                0
+              ]
+            }
+          }
+        }
+      }
+    ]);
+    
+    res.json({
+      transactions,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+      totalTransactions: total,
+      summary: summary[0] || {
+        totalAmount: 0,
+        completedTransactions: 0,
+        pendingTransactions: 0,
+        totalDeposits: 0,
+        totalWithdrawals: 0
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch transactions', 
+      details: error.message 
+    });
+  }
+});
+
+// Get transaction by ID
+router.get('/:id', async (req, res) => {
+  try {
+    const transaction = await Transaction.findOne({ 
+      transactionId: req.params.id.toUpperCase() 
+    }).select('-__v');
+    
+    if (!transaction) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    
+    res.json(transaction);
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch transaction', 
+      details: error.message 
+    });
+  }
+});
+
+// Create new transaction
+router.post('/', async (req, res) => {
+  try {
+    const {
+      transactionId,
+      memberNumber,
+      date,
+      type,
+      amount,
+      status,
+      accountBalance,
+      confirmedBy,
+      description,
+      reference,
+      category
+    } = req.body;
+
+    if (!memberNumber || !type || amount == null) {
+      return res.status(400).json({ 
+        error: 'Missing required fields',
+        details: 'memberNumber, type, and amount are required'
+      });
+    }
+
+    // Verify user exists
+    const user = await User.findOne({ 
+      memberNumber: memberNumber.toUpperCase() 
+    });
+    
+    if (!user) {
+      return res.status(400).json({ 
+        error: 'User not found',
+        details: 'Member must be registered first'
+      });
+    }
+
+    // Verify account exists
+    const account = await Account.findOne({ 
+      memberNumber: memberNumber.toUpperCase() 
+    });
+    
+    if (!account) {
+      return res.status(400).json({ 
+        error: 'Account not found',
+        details: 'Account must be created first'
+      });
+    }
+
+    // Generate transaction ID if not provided
+    const finalTransactionId = transactionId || Transaction.generateTransactionId();
+
+    // Check if transaction ID already exists
+    if (transactionId) {
+      const existingTransaction = await Transaction.findOne({ 
+        transactionId: finalTransactionId.toUpperCase() 
+      });
+      
+      if (existingTransaction) {
+        return res.status(400).json({ 
+          error: 'Transaction already exists',
+          details: 'Transaction ID must be unique'
+        });
+      }
+    }
+
+    const newTransaction = new Transaction({
+      transactionId: finalTransactionId,
+      memberNumber,
+      date: date || new Date(),
+      type,
+      amount,
+      status: status || 'pending',
+      accountBalance: accountBalance || account.savings,
+      confirmedBy,
+      description,
+      reference,
+      category
+    });
+
+    const savedTransaction = await newTransaction.save();
+    
+    // Update account balance if transaction is completed
+    if (savedTransaction.status === 'completed') {
+      if (type === 'deposit' || type === 'contribution') {
+        await account.updateBalance(amount, 'credit');
+      } else if (type === 'withdrawal') {
+        await account.updateBalance(amount, 'debit');
+      }
+    }
+
+    res.status(201).json(savedTransaction);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        details: errors 
+      });
+    }
+    res.status(500).json({ 
+      error: 'Failed to create transaction', 
+      details: error.message 
+    });
+  }
+});
+
+// Update transaction
+router.put('/:id', async (req, res) => {
+  try {
+    const { 
+      memberNumber, 
+      date, 
+      type, 
+      amount, 
+      status, 
+      accountBalance, 
+      confirmedBy,
+      description,
+      reference,
+      category
+    } = req.body;
+    
+    const transaction = await Transaction.findOne({ 
+      transactionId: req.params.id.toUpperCase() 
+    });
+    
+    if (!transaction) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    
+    // Store old values for balance adjustment
+    const oldStatus = transaction.status;
+    const oldAmount = transaction.amount;
+    const oldType = transaction.type;
+    
+    const updatedTransaction = await Transaction.findOneAndUpdate(
+      { transactionId: req.params.id.toUpperCase() },
+      {
+        memberNumber,
+        date,
+        type,
+        amount,
+        status,
+        accountBalance,
+        confirmedBy,
+        description,
+        reference,
+        category
+      },
+      { 
+        new: true, 
+        runValidators: true,
+        omitUndefined: true
+      }
+    ).select('-__v');
+
+    // Update account balance if status changed to completed
+    if (updatedTransaction.memberNumber) {
+      const account = await Account.findOne({ 
+        memberNumber: updatedTransaction.memberNumber.toUpperCase() 
+      });
+      
+      if (account) {
+        // Reverse old transaction if it was completed
+        if (oldStatus === 'completed') {
+          if (oldType === 'deposit' || oldType === 'contribution') {
+            await account.updateBalance(oldAmount, 'debit');
+          } else if (oldType === 'withdrawal') {
+            await account.updateBalance(oldAmount, 'credit');
+          }
+        }
+        
+        // Apply new transaction if completed
+        if (updatedTransaction.status === 'completed') {
+          if (updatedTransaction.type === 'deposit' || updatedTransaction.type === 'contribution') {
+            await account.updateBalance(updatedTransaction.amount, 'credit');
+          } else if (updatedTransaction.type === 'withdrawal') {
+            await account.updateBalance(updatedTransaction.amount, 'debit');
+          }
+        }
+      }
+    }
+
+    res.json(updatedTransaction);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        details: errors 
+      });
+    }
+    res.status(500).json({ 
+      error: 'Failed to update transaction', 
+      details: error.message 
+    });
+  }
+});
+
+// Delete transaction
+router.delete('/:id', async (req, res) => {
+  try {
+    const transaction = await Transaction.findOne({ 
+      transactionId: req.params.id.toUpperCase() 
+    });
+    
+    if (!transaction) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    
+    // Reverse transaction if it was completed
+    if (transaction.status === 'completed') {
+      const account = await Account.findOne({ 
+        memberNumber: transaction.memberNumber 
+      });
+      
+      if (account) {
+        if (transaction.type === 'deposit' || transaction.type === 'contribution') {
+          await account.updateBalance(transaction.amount, 'debit');
+        } else if (transaction.type === 'withdrawal') {
+          await account.updateBalance(transaction.amount, 'credit');
+        }
+      }
+    }
+    
+    const deletedTransaction = await Transaction.findOneAndDelete({ 
+      transactionId: req.params.id.toUpperCase() 
+    });
+
+    res.json({ 
+      message: 'Transaction deleted successfully', 
+      transaction: deletedTransaction 
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to delete transaction', 
+      details: error.message 
+    });
+  }
+});
+
+// Complete/approve transaction
+router.patch('/:id/complete', async (req, res) => {
+  try {
+    const { confirmedBy } = req.body;
+    
+    const transaction = await Transaction.findOne({ 
+      transactionId: req.params.id.toUpperCase() 
+    });
+    
+    if (!transaction) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    
+    if (transaction.status === 'completed') {
+      return res.status(400).json({ 
+        error: 'Transaction already completed' 
+      });
+    }
+    
+    // Update account balance
+    const account = await Account.findOne({ 
+      memberNumber: transaction.memberNumber 
+    });
+    
+    if (!account) {
+      return res.status(400).json({ 
+        error: 'Account not found' 
+      });
+    }
+    
+    try {
+      if (transaction.type === 'deposit' || transaction.type === 'contribution') {
+        await account.updateBalance(transaction.amount, 'credit');
+      } else if (transaction.type === 'withdrawal') {
+        await account.updateBalance(transaction.amount, 'debit');
+      }
+      
+      await transaction.complete(confirmedBy);
+      
+      res.json({ 
+        message: 'Transaction completed successfully', 
+        transaction,
+        newAccountBalance: account.savings
+      });
+    } catch (balanceError) {
+      return res.status(400).json({ 
+        error: balanceError.message 
+      });
+    }
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to complete transaction', 
+      details: error.message 
+    });
+  }
+});
+
+// Get transactions by member number
+router.get('/member/:memberNumber', async (req, res) => {
+  try {
+    const { page = 1, limit = 10, status, type } = req.query;
+    const query = { memberNumber: req.params.memberNumber.toUpperCase() };
+    
+    if (status) query.status = status.toLowerCase();
+    if (type) query.type = type.toLowerCase();
+    
+    const transactions = await Transaction.find(query)
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .sort({ date: -1 })
+      .select('-__v');
+      
+    const total = await Transaction.countDocuments(query);
+    
+    res.json({
+      transactions,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+      totalTransactions: total
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch member transactions', 
+      details: error.message 
+    });
+  }
+});
+
+module.exports = router;
+const express = require('express');
+const router = express.Router();
+const User = require('../models/users.models');
+const { adminOnly, restrictToOwner } = require('../middleware/auth');
+
+// Get all users
+router.get('/', adminOnly, async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search, status } = req.query;
+    const query = {};
+    
+    // Search functionality
+    if (search) {
+      query.$or = [
+        { fname: { $regex: search, $options: 'i' } },
+        { lname: { $regex: search, $options: 'i' } },
+        { memberNumber: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    // Status filter
+    if (status !== undefined) {
+      query.isActive = status === 'true';
+    }
+    
+    const users = await User.find(query)
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .sort({ createdAt: -1 })
+      .select('-__v');
+      
+    const total = await User.countDocuments(query);
+    
+    res.json({
+      users,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+      totalUsers: total
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch users', 
+      details: error.message 
+    });
+  }
+});
+
+// Get user by member number
+router.get('/:id', restrictToOwner, async (req, res) => {
+  try {
+    const user = await User.findOne({ memberNumber: req.params.id.toUpperCase() })
+      .select('-__v');
+      
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to fetch user', 
+      details: error.message 
+    });
+  }
+});
+
+// Create new user
+router.post('/',adminOnly, async (req, res) => {
+  try {
+    const { memberNumber, fname, lname, email, phoneNumber, dateJoined, emergencyContacts } = req.body;
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ 
+      $or: [
+        { memberNumber: memberNumber?.toUpperCase() },
+        { email: email?.toLowerCase() }
+      ]
+    });
+    
+    if (existingUser) {
+      return res.status(400).json({ 
+        error: 'User already exists', 
+        details: 'Member number or email already in use' 
+      });
+    }
+
+    const newUser = new User({
+      memberNumber,
+      fname,
+      lname,
+      email,
+      phoneNumber,
+      dateJoined,
+      emergencyContacts
+    });
+
+    const savedUser = await newUser.save();
+    res.status(201).json(savedUser);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        details: errors 
+      });
+    }
+    res.status(500).json({ 
+      error: 'Failed to create user', 
+      details: error.message 
+    });
+  }
+});
+
+// Update user by member number
+router.put('/:id',restrictToOwner, async (req, res) => {
+  try {
+    const { fname, lname, email, phoneNumber, dateJoined, emergencyContacts, isActive } = req.body;
+    
+    const updatedUser = await User.findOneAndUpdate(
+      { memberNumber: req.params.id.toUpperCase() },
+      {
+        fname,
+        lname,
+        email,
+        phoneNumber,
+        dateJoined,
+        emergencyContacts,
+        isActive
+      },
+      { 
+        new: true, 
+        runValidators: true,
+        omitUndefined: true // Only update provided fields
+      }
+    ).select('-__v');
+
+    if (!updatedUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json(updatedUser);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        details: errors 
+      });
+    }
+    res.status(500).json({ 
+      error: 'Failed to update user', 
+      details: error.message 
+    });
+  }
+});
+
+// Delete user by member number (soft delete)
+router.delete('/:id',adminOnly, async (req, res) => {
+  try {
+    const user = await User.findOneAndUpdate(
+      { memberNumber: req.params.id.toUpperCase() },
+      { isActive: false },
+      { new: true }
+    ).select('-__v');
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ 
+      message: 'User deactivated successfully', 
+      user 
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to delete user', 
+      details: error.message 
+    });
+  }
+});
+
+// Permanently delete user
+router.delete('/:id/permanent',adminOnly, async (req, res) => {
+  try {
+    const deletedUser = await User.findOneAndDelete({ 
+      memberNumber: req.params.id.toUpperCase() 
+    });
+
+    if (!deletedUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ 
+      message: 'User permanently deleted', 
+      user: deletedUser 
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to permanently delete user', 
+      details: error.message 
+    });
+  }
+});
+
+// Restore deactivated user
+router.patch('/:id/restore',adminOnly, async (req, res) => {
+  try {
+    const user = await User.findOneAndUpdate(
+      { memberNumber: req.params.id.toUpperCase() },
+      { isActive: true },
+      { new: true }
+    ).select('-__v');
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ 
+      message: 'User restored successfully', 
+      user 
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to restore user', 
+      details: error.message 
+    });
+  }
+});
+
+module.exports = router;

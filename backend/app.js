@@ -1,106 +1,85 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { authMiddleware } = require('./middleware/auth');
-const connectDB = require('./config/database');
+const morgan = require('morgan');
+const helmet = require('helmet');
+const mongoose = require('mongoose');
+
+// CHANGED 'MONGO_URI' to 'MONGODB_URI' to match your .env file
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/pesaflow')
+  .then(() => console.log('✅ MongoDB Connected'))
+  .catch(err => console.error('❌ MongoDB Error:', err.message));
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Connect to MongoDB
-connectDB();
-
-// Middleware
+app.use(helmet());
 app.use(cors());
+app.use(morgan('dev'));
 app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
-// Request logging middleware
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  next();
-});
+// ==================== AUTHENTICATION ====================
+const { authenticate } = require('./middleware/rbac');
+app.use('/api', authenticate);
 
-// auth route
-const authRoutes = require('./routes/auth.routes');
-app.use('/api/auth', authRoutes);
-
-//routes
-const userRoutes = require('./routes/user.routes');
-const accountRoutes = require('./routes/account.routes');
+// ==================== ROUTES ====================
+const membersRoutes = require('./routes/members.routes');
+app.use('/api/members', membersRoutes);
+const adminRoutes = require('./routes/admin.routes');
+app.use('/api/admin', adminRoutes);
+const savingsRoutes = require('./routes/savings.routes');
+app.use('/api/savings', savingsRoutes);
+const settingsRoutes = require('./routes/settings.routes');
+app.use('/api/settings', settingsRoutes);
+const loansRoutes = require('./routes/loans.routes');
+app.use('/api/loans', loansRoutes);
+const businessRoutes = require('./routes/business.routes');
+app.use('/api/business', businessRoutes);
+const dividendRoutes = require('./routes/dividend.routes');
+app.use('/api/dividends', dividendRoutes);
+const memberPortalRoutes = require('./routes/memberPortal.routes');
+app.use('/api/member', memberPortalRoutes);
+const leaderRoutes = require('./routes/leader.routes');
+app.use('/api/leaders', leaderRoutes);
+const investmentRoutes = require('./routes/investment.routes');
+app.use('/api/investments', investmentRoutes);
+const clubExpenseRoutes = require('./routes/clubExpense.routes');
+app.use('/api/club-expenses', clubExpenseRoutes);
+const reportRoutes = require('./routes/report.routes');
+app.use('/api/reports', reportRoutes);
+const receiptRoutes = require('./routes/receipt.routes');
+app.use('/api/receipts', receiptRoutes);
+const clubProfileRoutes = require('./routes/clubProfile.routes');
+app.use('/api/club-profile', clubProfileRoutes);
+const withdrawalRoutes = require('./routes/withdrawal.routes');
+app.use('/api/withdrawals', withdrawalRoutes);
 const transactionRoutes = require('./routes/transaction.routes');
+app.use('/api/transactions', transactionRoutes);
+const shareCertificateRoutes = require('./routes/shareCertificate.routes');
+app.use('/api/share-certificates', shareCertificateRoutes);
+const expensesRoutes = require('./routes/expenses.routes');
+app.use('/api/expenses', expensesRoutes);
+const deliveryNoteRoutes = require('./routes/deliveryNote.routes');
+app.use('/api/delivery-notes', deliveryNoteRoutes);
 
-app.use('/api/users', authMiddleware, userRoutes);
-app.use('/api/accounts',authMiddleware , accountRoutes);
-app.use('/api/transactions',authMiddleware , transactionRoutes);
-
-// Root route`1q
-app.get('/', (req, res) => {
-  res.json({
-    message: 'PesaFlow API is running',
-    version: '1.0.0',
-    timestamp: new Date().toISOString(),
-    endpoints: {
-      users: '/api/users',
-      accounts: '/api/accounts',
-      transactions: '/api/transactions'
-    }
-  });
-});
-
-// Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    environment: process.env.NODE_ENV || 'development'
-  });
+  res.status(200).json({ status: 'OK', message: 'PesaFlow backend running' });
 });
 
-// Error handling middleware
+app.use((req, res) => {
+  res.status(404).json({ error: 'Route not found' });
+});
+
 app.use((err, req, res, next) => {
-  console.error('Error:', err.stack);
-  
-  if (err.name === 'ValidationError') {
-    const errors = Object.values(err.errors).map(e => e.message);
-    return res.status(400).json({
-      error: 'Validation Error',
-      details: errors
-    });
-  }
-  
-  if (err.name === 'CastError') {
-    return res.status(400).json({
-      error: 'Invalid ID format',
-      details: err.message
-    });
-  }
-  
-  if (err.code === 11000) {
-    const field = Object.keys(err.keyValue)[0];
-    return res.status(400).json({
-      error: 'Duplicate Entry',
-      details: `${field} already exists`
-    });
-  }
-  
-  res.status(500).json({
-    error: 'Internal Server Error',
-    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
-  });
+  console.error(err.stack);
+  res.status(500).json({ error: 'Something went wrong!' });
 });
 
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({
-    error: 'Route not found',
-    message: `Cannot ${req.method} ${req.originalUrl}`
-  });
-});
+const bootstrap = require('./utils/bootstrap');
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server is running on port ${PORT}`);
-  console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔗 API URL: http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', async () => {
+  console.log(`✅ Server running at http://localhost:${PORT}`);
+  console.log(`✅ Also accessible at http://<your-lan-ip>:${PORT}`);
+  await bootstrap();
 });
