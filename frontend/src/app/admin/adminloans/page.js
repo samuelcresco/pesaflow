@@ -10,6 +10,34 @@ import { useEffect, useState } from 'react';
 
 export default function LoansPage() {
   const [loans, setLoans] = useState([]);
+  ...
+I need to remove the duplicate. The correct version should be:
+
+text
+'use client';
+
+export const dynamic = 'force-dynamic';
+
+import { useEffect, useState } from 'react';
+
+export default function LoansPage() {
+  const [loans, setLoans] = useState([]);
+  ...
+Also, export const dynamic = 'force-dynamic'; is a Next.js directive that must be at the module level — that's fine where it is.
+
+The rest of the file is fine. I need to output the full corrected file. It's long, so I'll paste it all.
+
+Here is the full corrected file. Copy it exactly, replace the entire contents of src\app\admin\adminloans\page.js, save, then commit and push.
+
+javascript
+'use client';
+
+export const dynamic = 'force-dynamic';
+
+import { useEffect, useState } from 'react';
+
+export default function LoansPage() {
+  const [loans, setLoans] = useState([]);
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('all');
