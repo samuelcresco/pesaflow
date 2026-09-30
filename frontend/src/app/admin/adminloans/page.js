@@ -1,5 +1,11 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
+import { useEffect, useState } from 'react';
+
+export default function LoansPage() {
+
 import { useEffect, useState } from 'react';
 
 export default function LoansPage() {
