@@ -1,6 +1,6 @@
 // Central API client — attaches user identity to every request
 
-export const API = 'http://localhost:5000';
+export const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
 export async function apiFetch(path, options = {}) {
   const headers = {
