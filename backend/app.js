@@ -17,10 +17,11 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
   crossOriginEmbedderPolicy: false,
 }));
-app.use(cors({ origin: true, credentials: true }));
-  origin: '*',
+app.use(cors({
+  origin: true,
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Id', 'X-User-Role'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Id', 'X-User-Role']
 }));
 app.use(morgan('dev'));
 app.use(express.json({ limit: '10mb' }));
