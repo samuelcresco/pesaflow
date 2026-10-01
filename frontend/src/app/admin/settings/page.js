@@ -58,7 +58,7 @@ export default function ClubSettings() {
 
     try {
       localStorage.setItem('clubSettings', JSON.stringify(club));
-      await axios.post('http://localhost:5000/api/settings/club', club);
+      await axios.post('https://pesaflow-api-jpll.onrender.com/api/settings/club', club);
       setMessage('✅ Club settings saved successfully!');
       setTimeout(() => {
         window.location.href = '/dashboard';

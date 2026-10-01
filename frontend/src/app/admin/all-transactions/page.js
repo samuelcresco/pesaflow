@@ -11,7 +11,7 @@ export default function AllTransactions() {
 
   const fetchAll = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/savings');
+      const res = await fetch('https://pesaflow-api-jpll.onrender.com/api/savings');
       const data = await res.json();
       setTransactions(Array.isArray(data) ? data : []);
     } catch (err) { console.error(err); }
@@ -20,7 +20,7 @@ export default function AllTransactions() {
 
   const deleteTxn = async (id) => {
     if (!confirm('Delete this transaction? It will be reversed.')) return;
-    const res = await fetch(`http://localhost:5000/api/savings/${id}`, { method: 'DELETE' });
+    const res = await fetch(`https://pesaflow-api-jpll.onrender.com/api/savings/${id}`, { method: 'DELETE' });
     if (res.ok) {
       alert('✅ Deleted');
       fetchAll();

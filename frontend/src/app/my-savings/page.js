@@ -23,7 +23,7 @@ export default function MySavings() {
 
   const fetchSavings = async (memberNumber) => {
     try {
-      const response = await axios.get(`http://localhost:5000/api/savings/member/${memberNumber}`);
+      const response = await axios.get(`https://pesaflow-api-jpll.onrender.com/api/savings/member/${memberNumber}`);
       setSavings(response.data);
       setLoading(false);
     } catch (err) {

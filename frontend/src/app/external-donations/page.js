@@ -24,7 +24,7 @@ export default function ExternalDonations() {
   };
 
   const downloadPDF = () => {
-    window.open('http://localhost:5000/api/savings/external-donations/pdf', '_blank');
+    window.open('https://pesaflow-api-jpll.onrender.com/api/savings/external-donations/pdf', '_blank');
   };
 
   if (loading) return <div style={{ padding: '40px' }}>Loading...</div>;

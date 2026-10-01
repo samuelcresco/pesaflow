@@ -329,7 +329,7 @@ export default function LoansPage() {
         <Btn onClick={() => setShowApply(true)} color="#2563eb">➕ New Loan Application</Btn>
         <Btn onClick={() => setShowFund(true)} color="#f59e0b">💰 Fund from Club Capital</Btn>
         <Btn onClick={() => setShowExternal(true)} color="#0891b2">💵 Fund from External Funder</Btn>
-        <Btn onClick={() => setPdfModal({ title: 'General Loan Statement', url: 'http://localhost:5000/api/loans/general-loan-statement/pdf' })} color="#7c3aed">📄 General Loan Statement</Btn>
+        <Btn onClick={() => setPdfModal({ title: 'General Loan Statement', url: 'https://pesaflow-api-jpll.onrender.com/api/loans/general-loan-statement/pdf' })} color="#7c3aed">📄 General Loan Statement</Btn>
         <Btn onClick={() => setShowExtractToLoan(true)} color="#16a34a">💵 Extract Interest to Loan Fund</Btn>
         <Btn onClick={() => setShowExtractToClub(true)} color="#dc2626">🏛️ Extract Interest to Club Capital</Btn>
       </div>
@@ -632,7 +632,7 @@ export default function LoansPage() {
                 setScheduleModal(null);
                 setPdfModal({
                   title: `Repayment Schedule — ${memberName}`,
-                  url: `http://localhost:5000/api/loans/repayment-schedule/${loanId}/pdf`
+                  url: `https://pesaflow-api-jpll.onrender.com/api/loans/repayment-schedule/${loanId}/pdf`
                 });
               }}
               style={btn('#7c3aed')}

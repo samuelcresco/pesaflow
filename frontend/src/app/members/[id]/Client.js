@@ -13,7 +13,7 @@ export default function MemberProfile() {
   useEffect(() => {
     const fetchMember = async () => {
       try {
-        const response = await axios.get(`http://localhost:5000/api/users/${id}`);
+        const response = await axios.get(`https://pesaflow-api-jpll.onrender.com/api/users/${id}`);
         setMember(response.data);
       } catch (err) {
         setError('Member not found');

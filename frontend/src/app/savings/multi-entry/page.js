@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../../api-client';
 
-const API = 'http://localhost:5000';
+const API = 'https://pesaflow-api-jpll.onrender.com';
 
 export default function MultiEntryPage() {
   const [members, setMembers] = useState([]);

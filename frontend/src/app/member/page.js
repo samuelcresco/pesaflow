@@ -224,7 +224,7 @@ export default function MemberDashboard() {
             <Card title="Locked (Loan)" value={savings.totals.locked || 0} color="#dc2626" bg="#fee2e2" />
           </div>
           <div style={{ marginBottom: '20px' }}>
-            <button onClick={() => setPdfModal({ title: 'My Savings Statement', url: `http://localhost:5000/api/savings/member-statement/${member.id}` })} style={btn('#3b82f6')}>📄 Download Statement PDF</button>
+            <button onClick={() => setPdfModal({ title: 'My Savings Statement', url: `https://pesaflow-api-jpll.onrender.com/api/savings/member-statement/${member.id}` })} style={btn('#3b82f6')}>📄 Download Statement PDF</button>
           </div>
           <h3>Transaction History</h3>
           <table style={table}>
@@ -323,7 +323,7 @@ export default function MemberDashboard() {
 
                   {c.status === 'issued' ? (
                     <a
-                      href={`http://localhost:5000/api/share-certificates/${c._id}/pdf`}
+                      href={`https://pesaflow-api-jpll.onrender.com/api/share-certificates/${c._id}/pdf`}
                       target="_blank"
                       rel="noopener noreferrer"
                       style={{ display: 'block', textAlign: 'center', padding: '10px', background: '#0f3460', color: '#fff', borderRadius: '8px', textDecoration: 'none', fontWeight: '600', fontSize: '13px' }}
@@ -395,8 +395,8 @@ export default function MemberDashboard() {
 
                     <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                       <button onClick={() => viewSchedule(loan._id)} style={{ background: '#fff', color: '#0f3460', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>📋 View Schedule</button>
-                      <button onClick={() => setPdfModal({ title: `Loan Statement — ${loan.type}`, url: `http://localhost:5000/api/loans/${loan._id}/statement-pdf` })} style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>📄 Statement PDF</button>
-                      <button onClick={() => setPdfModal({ title: `Repayment Schedule — ${loan.type}`, url: `http://localhost:5000/api/loans/${loan._id}/schedule-pdf` })} style={{ background: '#0891b2', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>📋 Schedule PDF</button>
+                      <button onClick={() => setPdfModal({ title: `Loan Statement — ${loan.type}`, url: `https://pesaflow-api-jpll.onrender.com/api/loans/${loan._id}/statement-pdf` })} style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>📄 Statement PDF</button>
+                      <button onClick={() => setPdfModal({ title: `Repayment Schedule — ${loan.type}`, url: `https://pesaflow-api-jpll.onrender.com/api/loans/${loan._id}/schedule-pdf` })} style={{ background: '#0891b2', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>📋 Schedule PDF</button>
                     </div>
                   </div>
                 );
@@ -438,7 +438,7 @@ export default function MemberDashboard() {
                   </div>
                   <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     <button onClick={() => viewSchedule(loan._id)} style={btnMini('#3b82f6')}>📋 View Schedule</button>
-                    <button onClick={() => setPdfModal({ title: `Loan Statement — ${loan.type}`, url: `http://localhost:5000/api/loans/${loan._id}/statement-pdf` })} style={btnMini('#7c3aed')}>📄 Statement</button>
+                    <button onClick={() => setPdfModal({ title: `Loan Statement — ${loan.type}`, url: `https://pesaflow-api-jpll.onrender.com/api/loans/${loan._id}/statement-pdf` })} style={btnMini('#7c3aed')}>📄 Statement</button>
                   </div>
                 </div>
               ))}

@@ -38,29 +38,29 @@ export default function MemberProfile() {
 
     const fetchData = async () => {
       try {
-        const memberRes = await axios.get(`http://localhost:5000/api/members/${memberNumber}`);
+        const memberRes = await axios.get(`https://pesaflow-api-jpll.onrender.com/api/members/${memberNumber}`);
         setMember(memberRes.data);
 
         try {
-          const savingsRes = await axios.get(`http://localhost:5000/api/savings/member/${memberNumber}`);
+          const savingsRes = await axios.get(`https://pesaflow-api-jpll.onrender.com/api/savings/member/${memberNumber}`);
           setTransactions(savingsRes.data.savings || []);
           setTotalSavings(savingsRes.data.totalSavings || 0);
         } catch (e) {}
 
         try {
-          const groupRes = await axios.get('http://localhost:5000/api/savings/summary');
+          const groupRes = await axios.get('https://pesaflow-api-jpll.onrender.com/api/savings/summary');
           setGroupSavings(groupRes.data);
         } catch (e) {}
 
         try {
-          const loansRes = await axios.get(`http://localhost:5000/api/loans/member/${memberNumber}`);
+          const loansRes = await axios.get(`https://pesaflow-api-jpll.onrender.com/api/loans/member/${memberNumber}`);
           setMemberLoans(loansRes.data.loans || []);
           setLoanLimit(loansRes.data.loanLimit || 0);
         } catch (e) {}
 
         if (parsedUser.role === 'admin') {
           try {
-            const allLoansRes = await axios.get('http://localhost:5000/api/loans/all');
+            const allLoansRes = await axios.get('https://pesaflow-api-jpll.onrender.com/api/loans/all');
             setAllLoans(allLoansRes.data || []);
           } catch (e) {}
         }
@@ -85,7 +85,7 @@ export default function MemberProfile() {
       return;
     }
     try {
-      const response = await axios.post('http://localhost:5000/api/loans/apply', {
+      const response = await axios.post('https://pesaflow-api-jpll.onrender.com/api/loans/apply', {
         memberNumber: memberNumber,
         loanType: loanType,
         amount: Number(loanAmount),
@@ -95,7 +95,7 @@ export default function MemberProfile() {
       setLoanAmount('');
       setLoanPurpose('');
       setShowLoanForm(false);
-      const loansRes = await axios.get(`http://localhost:5000/api/loans/member/${memberNumber}`);
+      const loansRes = await axios.get(`https://pesaflow-api-jpll.onrender.com/api/loans/member/${memberNumber}`);
       setMemberLoans(loansRes.data.loans || []);
       setLoanLimit(loansRes.data.loanLimit || 0);
     } catch (err) {

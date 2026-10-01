@@ -30,8 +30,8 @@ export default function LoansPage() {
   const fetchAll = async () => {
     try {
       const [l, m] = await Promise.all([
-        fetch('http://localhost:5000/api/loans').then(r => r.json()),
-        fetch('http://localhost:5000/api/members').then(r => r.json())
+        fetch('https://pesaflow-api-jpll.onrender.com/api/loans').then(r => r.json()),
+        fetch('https://pesaflow-api-jpll.onrender.com/api/members').then(r => r.json())
       ]);
       setLoans(Array.isArray(l) ? l : []);
       setMembers(Array.isArray(m) ? m : []);
@@ -44,7 +44,7 @@ export default function LoansPage() {
 
   const fetchSettings = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/settings');
+      const res = await fetch('https://pesaflow-api-jpll.onrender.com/api/settings');
       if (res.ok) setSettings(await res.json());
     } catch (err) {
       console.error(err);
@@ -57,7 +57,7 @@ export default function LoansPage() {
       return;
     }
     try {
-      const res = await fetch(`http://localhost:5000/api/loans/eligibility/${memberId}/${type}`);
+      const res = await fetch(`https://pesaflow-api-jpll.onrender.com/api/loans/eligibility/${memberId}/${type}`);
       const data = await res.json();
       setEligibility(data);
     } catch (err) {
@@ -89,7 +89,7 @@ export default function LoansPage() {
     e.preventDefault();
     setError('');
     try {
-      const res = await fetch('http://localhost:5000/api/loans/admin-apply', {
+      const res = await fetch('https://pesaflow-api-jpll.onrender.com/api/loans/admin-apply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -117,7 +117,7 @@ export default function LoansPage() {
 
   const updateStatus = async (loanId, status) => {
     try {
-      const res = await fetch(`http://localhost:5000/api/loans/${loanId}/status`, {
+      const res = await fetch(`https://pesaflow-api-jpll.onrender.com/api/loans/${loanId}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status })
@@ -131,7 +131,7 @@ export default function LoansPage() {
   const saveSettings = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch('http://localhost:5000/api/settings', {
+      const res = await fetch('https://pesaflow-api-jpll.onrender.com/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings)
@@ -146,7 +146,7 @@ export default function LoansPage() {
   };
 
   const downloadPDF = (loanId, type) => {
-    window.open(`http://localhost:5000/api/loans/${loanId}/${type}-pdf`, '_blank');
+    window.open(`https://pesaflow-api-jpll.onrender.com/api/loans/${loanId}/${type}-pdf`, '_blank');
   };
 
   const filteredLoans = activeTab === 'all' ? loans : loans.filter(l => l.status === activeTab);

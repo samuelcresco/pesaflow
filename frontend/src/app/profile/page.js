@@ -28,7 +28,7 @@ export default function MyProfile() {
 
     const fetchMember = async () => {
       try {
-        const response = await axios.get(`http://localhost:5000/api/members/${parsedUser.memberNumber}`);
+        const response = await axios.get(`https://pesaflow-api-jpll.onrender.com/api/members/${parsedUser.memberNumber}`);
         setMember(response.data);
         setLoading(false);
       } catch (err) {
@@ -97,7 +97,7 @@ export default function MyProfile() {
     }
 
     try {
-      const response = await axios.post('http://localhost:5000/api/loans/apply', {
+      const response = await axios.post('https://pesaflow-api-jpll.onrender.com/api/loans/apply', {
         memberNumber: member.memberNumber,
         amount: amount,
         purpose: loanPurpose,
@@ -111,7 +111,7 @@ export default function MyProfile() {
       setLoanDuration(6);
       setShowLoanForm(false);
       
-      const updated = await axios.get(`http://localhost:5000/api/members/${member.memberNumber}`);
+      const updated = await axios.get(`https://pesaflow-api-jpll.onrender.com/api/members/${member.memberNumber}`);
       setMember(updated.data);
     } catch (err) {
       setLoanError(err.response?.data?.error || 'Failed to apply for loan.');

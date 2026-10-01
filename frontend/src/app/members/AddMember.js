@@ -95,7 +95,7 @@ export default function AddMember() {
         tempPassword: formData.tempPassword || 'password123'
       };
 
-      const response = await axios.post('http://localhost:5000/api/members', memberData);
+      const response = await axios.post('https://pesaflow-api-jpll.onrender.com/api/members', memberData);
       setSuccess('Member created successfully!');
       setFormData({
         memberNumber: '',

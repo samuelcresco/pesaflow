@@ -198,8 +198,8 @@ export default function SavingsPage() {
 
       {/* PDF Reports + Links */}
       <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '16px' }}>
-        <Btn onClick={() => setPdfModal({ title: 'Club Capital Report', url: 'http://localhost:5000/api/savings/club-capital-report' })} color="#1e40af">📄 Club Capital Report</Btn>
-        <Btn onClick={() => setPdfModal({ title: 'General Report', url: 'http://localhost:5000/api/savings/general-report' })} color="#7c3aed">📊 General Report</Btn>
+        <Btn onClick={() => setPdfModal({ title: 'Club Capital Report', url: 'https://pesaflow-api-jpll.onrender.com/api/savings/club-capital-report' })} color="#1e40af">📄 Club Capital Report</Btn>
+        <Btn onClick={() => setPdfModal({ title: 'General Report', url: 'https://pesaflow-api-jpll.onrender.com/api/savings/general-report' })} color="#7c3aed">📊 General Report</Btn>
         <a href="/receipts" style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', borderRadius: '8px', textDecoration: 'none', fontSize: '14px', fontWeight: '600' }}>🧾 Receipts</a>
       </div>
 
@@ -264,7 +264,7 @@ export default function SavingsPage() {
                 <td style={{ padding: '12px', minWidth: '240px' }}>
                   <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'nowrap' }}>
                     <a href={`/all-transactions?member=${m._id}`} style={{ padding: '5px 10px', background: '#3b82f6', color: '#fff', borderRadius: '6px', textDecoration: 'none', fontSize: '12px', whiteSpace: 'nowrap' }}>View</a>
-                    <button onClick={() => setPdfModal({ title: `Statement — ${m.name}`, url: `http://localhost:5000/api/savings/member-statement/${m._id}` })} style={{ padding: '5px 10px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', whiteSpace: 'nowrap' }}>PDF</button>
+                    <button onClick={() => setPdfModal({ title: `Statement — ${m.name}`, url: `https://pesaflow-api-jpll.onrender.com/api/savings/member-statement/${m._id}` })} style={{ padding: '5px 10px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', whiteSpace: 'nowrap' }}>PDF</button>
                     <a href={`/receipts?member=${m._id}`} style={{ padding: '5px 10px', background: '#0891b2', color: '#fff', borderRadius: '6px', textDecoration: 'none', fontSize: '12px', whiteSpace: 'nowrap' }}>🧾</a>
                     <a href={`/withdrawals?member=${m._id}`} style={{ padding: '5px 10px', background: '#dc2626', color: '#fff', borderRadius: '6px', textDecoration: 'none', fontSize: '12px', whiteSpace: 'nowrap' }}>💸</a>
                   </div>

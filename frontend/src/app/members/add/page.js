@@ -116,7 +116,7 @@ export default function AddMember() {
     };
 
     try {
-      const res = await axios.post('http://localhost:5000/api/members', payload);
+      const res = await axios.post('https://pesaflow-api-jpll.onrender.com/api/members', payload);
       setMessage(`✅ Member created! Member No: ${formData.memberNumber} | Password: ${res.data.generatedPassword} — give this to the member.`);
       setTimeout(() => router.push('/members'), 4000);
     } catch (err) {

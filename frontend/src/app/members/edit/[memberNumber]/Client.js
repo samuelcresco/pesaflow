@@ -33,7 +33,7 @@ export default function EditMember() {
 
   const fetchMember = async () => {
     try {
-      const res = await axios.get(`http://localhost:5000/api/members/${memberId}`);
+      const res = await axios.get(`https://pesaflow-api-jpll.onrender.com/api/members/${memberId}`);
       const m = res.data;
       setFormData({
         memberNumber: m.memberNumber || '',
@@ -95,7 +95,7 @@ export default function EditMember() {
     setSaving(true);
     setMessage('');
     try {
-      await axios.put(`http://localhost:5000/api/members/${memberId}`, formData);
+      await axios.put(`https://pesaflow-api-jpll.onrender.com/api/members/${memberId}`, formData);
       setMessage('✅ Member updated successfully');
       setTimeout(() => router.push('/members'), 1500);
     } catch (err) {

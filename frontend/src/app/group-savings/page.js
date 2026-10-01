@@ -23,7 +23,7 @@ export default function GroupSavings() {
 
     const fetchGroupSavings = async () => {
       try {
-        const response = await axios.get('http://localhost:5000/api/savings/group');
+        const response = await axios.get('https://pesaflow-api-jpll.onrender.com/api/savings/group');
         setSavings(response.data.transactions || []);
         setTotalSavings(response.data.totalSavings || 0);
         setLoading(false);

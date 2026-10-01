@@ -8,7 +8,7 @@ export default function ApprovePage() {
 
   const fetchLoans = async () => {
     try {
-      const res = await axios.get('http://localhost:5000/api/loans/all');
+      const res = await axios.get('https://pesaflow-api-jpll.onrender.com/api/loans/all');
       setLoans(res.data);
     } catch (err) {
       console.error(err);
@@ -18,7 +18,7 @@ export default function ApprovePage() {
   const approveLoan = async (memberNumber, loanIndex) => {
     if (!confirm('Approve this loan?')) return;
     try {
-      const res = await axios.put(`http://localhost:5000/api/loans/update/${memberNumber}/${loanIndex}`, {
+      const res = await axios.put(`https://pesaflow-api-jpll.onrender.com/api/loans/update/${memberNumber}/${loanIndex}`, {
         status: 'Approved'
       });
       if (res.data.success) {

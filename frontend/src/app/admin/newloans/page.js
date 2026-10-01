@@ -32,8 +32,8 @@ export default function LoansPage() {
   const fetchAll = async () => {
     try {
       const [l, m] = await Promise.all([
-        fetch('http://localhost:5000/api/loans').then(r => r.json()),
-        fetch('http://localhost:5000/api/members').then(r => r.json())
+        fetch('https://pesaflow-api-jpll.onrender.com/api/loans').then(r => r.json()),
+        fetch('https://pesaflow-api-jpll.onrender.com/api/members').then(r => r.json())
       ]);
       setLoans(Array.isArray(l) ? l : []);
       setMembers(Array.isArray(m) ? m : []);
@@ -46,7 +46,7 @@ export default function LoansPage() {
 
   const fetchSettings = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/settings');
+      const res = await fetch('https://pesaflow-api-jpll.onrender.com/api/settings');
       if (res.ok) setSettings(await res.json());
     } catch (err) { console.error(err); }
   };
@@ -67,7 +67,7 @@ export default function LoansPage() {
     // Fetch eligibility when member or type changes
     if ((name === 'memberId' || name === 'type') && updated.memberId && updated.type) {
       try {
-        const res = await fetch(`http://localhost:5000/api/loans/eligibility/${updated.memberId}/${updated.type}`);
+        const res = await fetch(`https://pesaflow-api-jpll.onrender.com/api/loans/eligibility/${updated.memberId}/${updated.type}`);
         const data = await res.json();
         setEligibility(data);
       } catch (err) {
@@ -104,7 +104,7 @@ export default function LoansPage() {
       return;
     }
     try {
-      const res = await fetch('http://localhost:5000/api/loans/apply', {
+      const res = await fetch('https://pesaflow-api-jpll.onrender.com/api/loans/apply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -133,7 +133,7 @@ export default function LoansPage() {
 
   const updateStatus = async (loanId, status) => {
     try {
-      const res = await fetch(`http://localhost:5000/api/loans/${loanId}/status`, {
+      const res = await fetch(`https://pesaflow-api-jpll.onrender.com/api/loans/${loanId}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status })
@@ -148,7 +148,7 @@ export default function LoansPage() {
 
   const viewSchedule = async (loan) => {
     try {
-      const res = await fetch(`http://localhost:5000/api/loans/${loan._id}`);
+      const res = await fetch(`https://pesaflow-api-jpll.onrender.com/api/loans/${loan._id}`);
       const data = await res.json();
       setScheduleLoan(loan);
       setScheduleData(data);
@@ -157,7 +157,7 @@ export default function LoansPage() {
 
   const viewStatement = async (loan) => {
     try {
-      const res = await fetch(`http://localhost:5000/api/loans/${loan._id}/statement`);
+      const res = await fetch(`https://pesaflow-api-jpll.onrender.com/api/loans/${loan._id}/statement`);
       const data = await res.json();
       setStatementLoan(loan);
       setStatementData(data);
@@ -166,13 +166,13 @@ export default function LoansPage() {
 
   const markPaid = async (installmentId) => {
     try {
-      const res = await fetch(`http://localhost:5000/api/loans/repayment/${installmentId}`, {
+      const res = await fetch(`https://pesaflow-api-jpll.onrender.com/api/loans/repayment/${installmentId}`, {
         method: 'PUT'
       });
       if (res.ok) {
         alert('Installment marked as paid!');
         // Reload schedule
-        const res2 = await fetch(`http://localhost:5000/api/loans/${scheduleLoan._id}`);
+        const res2 = await fetch(`https://pesaflow-api-jpll.onrender.com/api/loans/${scheduleLoan._id}`);
         const data = await res2.json();
         setScheduleData(data);
         fetchAll();
@@ -183,7 +183,7 @@ export default function LoansPage() {
   const saveSettings = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch('http://localhost:5000/api/settings', {
+      const res = await fetch('https://pesaflow-api-jpll.onrender.com/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings)
@@ -489,7 +489,7 @@ export default function LoansPage() {
               </tbody>
             </table>
           </div>
-          <button onClick={() => window.open(`http://localhost:5000/api/loans/${scheduleLoan._id}/schedule`, '_blank')} style={{ ...btnStyle('#3b82f6'), marginTop: '14px' }}>🖨️ Download PDF</button>
+          <button onClick={() => window.open(`https://pesaflow-api-jpll.onrender.com/api/loans/${scheduleLoan._id}/schedule`, '_blank')} style={{ ...btnStyle('#3b82f6'), marginTop: '14px' }}>🖨️ Download PDF</button>
         </Modal>
       )}
 
@@ -512,7 +512,7 @@ export default function LoansPage() {
               </div>
             ))}
           </div>
-          <button onClick={() => window.open(`http://localhost:5000/api/loans/${statementLoan._id}/statement`, '_blank')} style={{ ...btnStyle('#7c3aed'), marginTop: '14px' }}>🖨️ Download PDF</button>
+          <button onClick={() => window.open(`https://pesaflow-api-jpll.onrender.com/api/loans/${statementLoan._id}/statement`, '_blank')} style={{ ...btnStyle('#7c3aed'), marginTop: '14px' }}>🖨️ Download PDF</button>
         </Modal>
       )}
     </div>
