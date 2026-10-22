@@ -1,4 +1,3 @@
-
 const Sale = require('../models/Sale');
 const Product = require('../models/Product');
 const Business = require('../models/Business');
@@ -237,11 +236,19 @@ exports.downloadSaleReceiptPDF = async (req, res) => {
     const sale = await Sale.findById(req.params.id);
     if (!sale) return res.status(404).json({ error: 'Sale not found' });
 
+    // Prevent browser caching so previews update instantly
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
     sale.printedCount = (sale.printedCount || 0) + 1;
     sale.lastPrintedAt = new Date();
     await sale.save();
 
-    await generateSaleReceiptPDF(sale, res);
+    // Extract selected signatories from the query string
+    const requestedSigs = req.query.signatories ? req.query.signatories.split(',') : [];
+
+    await generateSaleReceiptPDF(sale, res, requestedSigs);
   } catch (error) {
     console.error('SALE PDF ERROR:', error.message);
     if (!res.headersSent) res.status(500).json({ error: error.message });

@@ -20,7 +20,8 @@ const PATH_TO_CARD = {
   '/api/delivery-notes': 'delivery-notes',
   '/api/share-certificates': 'share-settings',
   '/api/transactions': 'reports',
-  '/api/member': 'members'
+  '/api/member': 'members',
+  '/api/constitution': 'share-settings'
 };
 
 // ==================== PUBLIC ROUTES (no auth required) ====================
@@ -38,6 +39,7 @@ const PUBLIC_PREFIXES = [
   '/api/expenses/vouchers/verify',
   '/api/business/sales/verify',
   '/api/delivery-notes/verify',
+  '/api/member-cards/verify',
   '/health'
 ];
 
@@ -54,10 +56,8 @@ function getCardForPath(path) {
 // ==================== AUTH MIDDLEWARE ====================
 async function authenticate(req, res, next) {
   try {
-    // req.originalUrl includes the /api prefix (since this middleware is mounted at /api)
     const path = (req.originalUrl || req.url || '').split('?')[0];
 
-    // Public routes always pass
     if (isPublic(path)) {
       req.user = { isPublic: true };
       return next();
@@ -66,25 +66,21 @@ async function authenticate(req, res, next) {
     const userId = req.headers['x-user-id'];
     const userRole = req.headers['x-user-role'];
 
-    // No identity provided → allow through (backwards compat for any unmigrated client)
     if (!userId || !userRole) {
       req.user = { isAnonymous: true };
       return next();
     }
 
-    // Admin / IT technician → full access
     if (userRole === 'admin' || userRole === 'it_technician') {
       req.user = { id: userId, role: userRole, isAdmin: true };
       return next();
     }
 
-    // Member portal → member is authenticated by their own login flow
     if (userRole === 'member') {
       req.user = { id: userId, role: 'member' };
       return next();
     }
 
-    // Leader → check their cardAccess
     const leader = await Leader.findById(userId).lean();
     if (!leader) {
       return res.status(401).json({ error: 'Session invalid. Please log in again.' });
@@ -95,13 +91,11 @@ async function authenticate(req, res, next) {
 
     const requiredCard = getCardForPath(path);
 
-    // If no card maps to this path, allow (e.g. /api/leaders/card-defaults)
     if (!requiredCard) {
       req.user = { id: userId, role: userRole, leader };
       return next();
     }
 
-    // Check access
     const hasAccess = (leader.cardAccess || []).includes(requiredCard);
     if (!hasAccess) {
       return res.status(403).json({
@@ -118,7 +112,7 @@ async function authenticate(req, res, next) {
   }
 }
 
-// ==================== ROLE GUARD (for future use) ====================
+// ==================== ROLE GUARD ====================
 function requireCard(cardId) {
   return (req, res, next) => {
     if (req.user?.isAdmin) return next();

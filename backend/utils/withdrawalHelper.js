@@ -1,13 +1,27 @@
 const WithdrawalSettings = require('../models/WithdrawalSettings');
 
+// ==================== MONTH NAME HELPER ====================
+const MONTH_NAMES = [
+  '', 'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+const monthName = (n) => MONTH_NAMES[Number(n) || 1] || '';
+
 // ==================== DEFAULT SETTINGS (fallback) ====================
 const DEFAULTS = {
   juneEnabled: true,
+  juneMonth: 6,
   juneStartDay: 15,
   juneEndDay: 30,
   decemberEnabled: true,
+  decemberMonth: 12,
   decemberStartDay: 15,
   decemberEndDay: 30,
+  dividendWindowEnabled: true,
+  dividendStartMonth: 12,
+  dividendStartDay: 1,
+  dividendEndMonth: 12,
+  dividendEndDay: 31,
   savingsCapPercent: 20,
   blockOnActiveLoan: true,
   allowOverride: true
@@ -25,20 +39,63 @@ async function getSettings() {
   }
 }
 
-// ==================== WINDOW CHECK ====================
-// Returns { ok: true, period: 'june' | 'december' } or { ok: false, period: null }
+// ==================== SAVINGS WINDOW CHECK ====================
 function isWithinWindow(date = new Date(), settings) {
   const d = new Date(date);
-  const month = d.getMonth() + 1; // 1-12
+  const month = d.getMonth() + 1;
   const day = d.getDate();
   const s = settings || DEFAULTS;
 
-  if (s.juneEnabled && month === 6 && day >= s.juneStartDay && day <= s.juneEndDay) {
-    return { ok: true, period: 'june' };
+  const m1 = Number(s.juneMonth) || 6;
+  const m2 = Number(s.decemberMonth) || 12;
+
+  if (s.juneEnabled && month === m1 && day >= s.juneStartDay && day <= s.juneEndDay) {
+    return { ok: true, period: 'window1' };
   }
-  if (s.decemberEnabled && month === 12 && day >= s.decemberStartDay && day <= s.decemberEndDay) {
-    return { ok: true, period: 'december' };
+  if (s.decemberEnabled && month === m2 && day >= s.decemberStartDay && day <= s.decemberEndDay) {
+    return { ok: true, period: 'window2' };
   }
+  return { ok: false, period: null };
+}
+
+// ==================== DIVIDEND WINDOW CHECK ====================
+// Supports windows that span across month boundaries (e.g. Dec 15 → Jan 15)
+function isWithinDividendWindow(date = new Date(), settings) {
+  const s = settings || DEFAULTS;
+  if (!s.dividendWindowEnabled) return { ok: false, period: null };
+
+  const d = new Date(date);
+  const month = d.getMonth() + 1;
+  const day = d.getDate();
+  const startM = Number(s.dividendStartMonth) || 12;
+  const startD = Number(s.dividendStartDay) || 1;
+  const endM = Number(s.dividendEndMonth) || 12;
+  const endD = Number(s.dividendEndDay) || 31;
+
+  // Same-month window (start ≤ end in same month)
+  if (startM === endM) {
+    if (month === startM && day >= startD && day <= endD) {
+      return { ok: true, period: 'dividend_window' };
+    }
+    return { ok: false, period: null };
+  }
+
+  // Cross-year window (start in later month, end in earlier month — e.g. Dec → Jan)
+  if (startM > endM) {
+    if ((month === startM && day >= startD) || (month === endM && day <= endD) || (month > startM) || (month < endM)) {
+      // Only allow months strictly between or in the range
+      if (month === startM) return { ok: day >= startD, period: 'dividend_window' };
+      if (month === endM) return { ok: day <= endD, period: 'dividend_window' };
+      if (month > startM || month < endM) return { ok: true, period: 'dividend_window' };
+      return { ok: false, period: null };
+    }
+    return { ok: false, period: null };
+  }
+
+  // Same-year normal window (start month < end month)
+  if (month === startM) return { ok: day >= startD, period: 'dividend_window' };
+  if (month === endM) return { ok: day <= endD, period: 'dividend_window' };
+  if (month > startM && month < endM) return { ok: true, period: 'dividend_window' };
   return { ok: false, period: null };
 }
 
@@ -46,28 +103,44 @@ function isWithinWindow(date = new Date(), settings) {
 function getWithdrawalWindow(date = new Date(), settings) {
   const s = settings || DEFAULTS;
   return {
-    june: {
+    window1: {
       enabled: s.juneEnabled,
+      month: Number(s.juneMonth) || 6,
+      monthName: monthName(s.juneMonth || 6),
       startDay: s.juneStartDay,
       endDay: s.juneEndDay,
-      label: `June ${s.juneStartDay}–${s.juneEndDay}`
+      label: `${monthName(s.juneMonth || 6)} ${s.juneStartDay}–${s.juneEndDay}`
     },
-    december: {
+    window2: {
       enabled: s.decemberEnabled,
+      month: Number(s.decemberMonth) || 12,
+      monthName: monthName(s.decemberMonth || 12),
       startDay: s.decemberStartDay,
       endDay: s.decemberEndDay,
-      label: `December ${s.decemberStartDay}–${s.decemberEndDay}`
+      label: `${monthName(s.decemberMonth || 12)} ${s.decemberStartDay}–${s.decemberEndDay}`
     }
   };
+}
+
+// ==================== DIVIDEND WINDOW LABEL ====================
+function getDividendWindowLabel(settings) {
+  const s = settings || DEFAULTS;
+  if (!s.dividendWindowEnabled) return 'disabled';
+  const start = `${monthName(s.dividendStartMonth || 12)} ${s.dividendStartDay || 1}`;
+  const end = `${monthName(s.dividendEndMonth || 12)} ${s.dividendEndDay || 31}`;
+  return `${start} – ${end}`;
 }
 
 // ==================== ELIGIBILITY CHECK ====================
 function checkEligibility(member, source, requestedAmount, date = new Date(), settings, options = {}) {
   const s = settings || DEFAULTS;
   const { allowOverride = false, overrideReason = '' } = options;
-  const window = isWithinWindow(date, s);
 
-  // Window check (can be overridden)
+  // Pick the right window based on source
+  const window = source === 'dividends'
+    ? isWithinDividendWindow(date, s)
+    : isWithinWindow(date, s);
+
   let windowOk = window.ok;
   let overrideUsed = false;
 
@@ -87,13 +160,15 @@ function checkEligibility(member, source, requestedAmount, date = new Date(), se
   if (!windowOk) {
     return {
       eligible: false,
-      reason: `Withdrawals are only allowed ${getWindowLabel(s)}.`,
+      reason: source === 'dividends'
+        ? `Dividend withdrawals are only allowed ${getDividendWindowLabel(s)}.`
+        : `Withdrawals are only allowed ${getWindowLabel(s)}.`,
       period: null
     };
   }
 
-  // Active loan check
-  if (s.blockOnActiveLoan && member.activeLoanId) {
+  // Active loan check (only for savings; dividends exempt)
+  if (source === 'savings' && s.blockOnActiveLoan && member.activeLoanId) {
     return {
       eligible: false,
       reason: 'Cannot withdraw while a loan is active. Savings are closed.',
@@ -160,15 +235,17 @@ function checkEligibility(member, source, requestedAmount, date = new Date(), se
 // ==================== WINDOW LABEL HELPER ====================
 function getWindowLabel(s) {
   const parts = [];
-  if (s.juneEnabled) parts.push(`June ${s.juneStartDay}–${s.juneEndDay}`);
-  if (s.decemberEnabled) parts.push(`December ${s.decemberStartDay}–${s.decemberEndDay}`);
+  if (s.juneEnabled) parts.push(`${monthName(s.juneMonth || 6)} ${s.juneStartDay}–${s.juneEndDay}`);
+  if (s.decemberEnabled) parts.push(`${monthName(s.decemberMonth || 12)} ${s.decemberStartDay}–${s.decemberEndDay}`);
   return parts.length > 0 ? parts.join(' and ') : 'not currently';
 }
 
 module.exports = {
   getSettings,
   isWithinWindow,
+  isWithinDividendWindow,
   getWithdrawalWindow,
+  getDividendWindowLabel,
   checkEligibility,
   getWindowLabel,
   DEFAULTS

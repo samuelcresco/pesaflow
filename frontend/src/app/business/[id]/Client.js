@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { apiFetch, API } from '../../api-client';
+import PdfOptionsModal from '../../../components/PdfOptionsModal';
 
 export default function BusinessDetailPage() {
   const params = useParams();
@@ -39,12 +40,14 @@ export default function BusinessDetailPage() {
 
   return (
     <div style={{ padding: '24px', maxWidth: '1400px', margin: '0 auto', fontFamily: 'Segoe UI, sans-serif' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
-        <div>
-          <h1 style={{ margin: 0, color: '#1e293b' }}>💼 {business.name}</h1>
-          {business.description && <p style={{ color: '#64748b', marginTop: '4px' }}>{business.description}</p>}
-        </div>
-        <a href="/business" style={btnSecondary}>← All Businesses</a>
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
+        <a href="/dashboard" style={btnSecondary}>← Back to Dashboard</a>
+        <a href="/business" style={btnSecondary}>🏢 All Businesses</a>
+      </div>
+
+      <div style={{ marginBottom: '20px' }}>
+        <h1 style={{ margin: 0, color: '#1e293b' }}>💼 {business.name}</h1>
+        {business.description && <p style={{ color: '#64748b', marginTop: '4px' }}>{business.description}</p>}
       </div>
 
       <div style={{ display: 'flex', gap: '4px', borderBottom: '2px solid #e5e7eb', marginBottom: '24px' }}>
@@ -63,8 +66,8 @@ export default function BusinessDetailPage() {
         ))}
       </div>
 
-      {tab === 'overview' && <OverviewTab business={business} summary={summary} />}
-      {tab === 'products' && <ProductsTab businessId={businessId} />}
+      {tab === 'overview' && <OverviewTab business={business} summary={summary} onRefresh={fetchBusiness} />}
+      {tab === 'products' && <ProductsTab businessId={businessId} business={business} onRefresh={fetchBusiness} />}
       {tab === 'sales' && <SalesTab businessId={businessId} businessName={business.name} />}
       {tab === 'settings' && <SettingsTab business={business} onUpdate={fetchBusiness} />}
     </div>
@@ -72,22 +75,21 @@ export default function BusinessDetailPage() {
 }
 
 // ==================== OVERVIEW ====================
-function OverviewTab({ business, summary }) {
-  const [poolStatus, setPoolStatus] = useState(null);
+function OverviewTab({ business, summary, onRefresh }) {
   const [showDeclare, setShowDeclare] = useState(false);
   const [declareAmount, setDeclareAmount] = useState('');
   const [declareNotes, setDeclareNotes] = useState('');
   const [msg, setMsg] = useState('');
 
-  useEffect(() => { fetchPool(); }, [business._id]);
+  const [showAllocate, setShowAllocate] = useState(false);
+  const [allocateAmount, setAllocateAmount] = useState('');
+  const [allocateNotes, setAllocateNotes] = useState('');
+  const [allocateMsg, setAllocateMsg] = useState('');
 
-  const fetchPool = async () => {
-    try {
-      const res = await apiFetch('/api/business/profit-pool/status');
-      const data = await res.json();
-      setPoolStatus(data);
-    } catch (err) { console.error(err); }
-  };
+  const [showReturn, setShowReturn] = useState(false);
+  const [returnAmount, setReturnAmount] = useState('');
+  const [returnNotes, setReturnNotes] = useState('');
+  const [returnMsg, setReturnMsg] = useState('');
 
   const submitDeclare = async () => {
     setMsg('');
@@ -106,14 +108,71 @@ function OverviewTab({ business, summary }) {
         setMsg('✅ ' + (d.message || 'Declared'));
         setDeclareAmount(''); setDeclareNotes('');
         setShowDeclare(false);
-        window.location.reload();
+        onRefresh();
       } else setMsg('❌ ' + (d.error || 'Failed'));
     } catch (err) { setMsg('❌ Network error'); }
+  };
+
+  const submitAllocate = async () => {
+    setAllocateMsg('');
+    const amt = Number(allocateAmount);
+    if (!amt || amt <= 0) return setAllocateMsg('❌ Enter a valid amount');
+
+    try {
+      const res = await apiFetch('/api/business/allocate-capital', {
+        method: 'POST',
+        body: JSON.stringify({
+          businessId: business._id,
+          amount: amt,
+          notes: allocateNotes
+        })
+      });
+      const d = await res.json();
+      if (res.ok) {
+        setAllocateMsg('✅ ' + (d.message || 'Allocated'));
+        setAllocateAmount('');
+        setAllocateNotes('');
+        setTimeout(() => {
+          setShowAllocate(false);
+          setAllocateMsg('');
+          onRefresh();
+        }, 900);
+      } else setAllocateMsg('❌ ' + (d.error || 'Failed'));
+    } catch (err) { setAllocateMsg('❌ Network error'); }
+  };
+
+  const submitReturn = async () => {
+    setReturnMsg('');
+    const amt = Number(returnAmount);
+    if (!amt || amt <= 0) return setReturnMsg('❌ Enter a valid amount');
+
+    try {
+      const res = await apiFetch('/api/business/return-capital', {
+        method: 'POST',
+        body: JSON.stringify({
+          businessId: business._id,
+          amount: amt,
+          notes: returnNotes
+        })
+      });
+      const d = await res.json();
+      if (res.ok) {
+        setReturnMsg('✅ ' + (d.message || 'Returned'));
+        setReturnAmount('');
+        setReturnNotes('');
+        setTimeout(() => {
+          setShowReturn(false);
+          setReturnMsg('');
+          onRefresh();
+        }, 900);
+      } else setReturnMsg('❌ ' + (d.error || 'Failed'));
+    } catch (err) { setReturnMsg('❌ Network error'); }
   };
 
   const retention = Number(business.minimumRetention) || 0;
   const balance = Number(business.currentBalance) || 0;
   const declarable = Math.max(0, balance - retention);
+  const clubCapitalAvailable = Number(summary?.clubCapitalAvailable) || 0;
 
   return (
     <div>
@@ -121,11 +180,33 @@ function OverviewTab({ business, summary }) {
         <div style={{ padding: '12px', borderRadius: '8px', marginBottom: '16px', background: msg.startsWith('✅') ? '#dcfce7' : '#fee2e2', color: msg.startsWith('✅') ? '#065f46' : '#991b1b', fontWeight: '600' }}>{msg}</div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '16px' }}>
         <Card title="Current Balance" value={balance} color="#0369a1" bg="#e0f2fe" icon="💰" />
+        <Card title="Total Capital Allocated" value={business.totalCapitalAllocated || 0} color="#0891b2" bg="#cffafe" icon="🏦" />
         <Card title="Total Declared to Pool" value={business.totalProfitDeclared || 0} color="#7c3aed" bg="#f3e8ff" icon="📈" />
-        <Card title="Minimum Retention" value={retention} color="#b45309" bg="#fef9e7" icon="🔒" />
         <Card title="Available to Declare" value={declarable} color="#15803d" bg="#dcfce7" icon="✅" />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px' }}>
+        <div style={{ background: '#e0f2fe', border: '1px solid #7dd3fc', padding: '16px', borderRadius: '12px' }}>
+          <div style={{ fontWeight: '600', color: '#0c4a6e', marginBottom: '6px' }}>💰 Allocate Capital from Club Capital</div>
+          <div style={{ fontSize: '12px', color: '#075985', marginBottom: '10px' }}>
+            Available in Club Capital: <strong>UGX {clubCapitalAvailable.toLocaleString()}</strong>
+          </div>
+          <button onClick={() => { setShowAllocate(true); setAllocateMsg(''); }} style={btn('#0891b2')}>Allocate Capital</button>
+        </div>
+
+        <div style={{ background: '#fef9e7', border: '1px solid #fcd34d', padding: '16px', borderRadius: '12px' }}>
+          <div style={{ fontWeight: '600', color: '#78350f', marginBottom: '6px' }}>↩️ Return Capital to Club Capital</div>
+          <div style={{ fontSize: '12px', color: '#92400e', marginBottom: '10px' }}>
+            Business balance: <strong>UGX {balance.toLocaleString()}</strong>
+          </div>
+          <button
+            onClick={() => { setShowReturn(true); setReturnMsg(''); }}
+            disabled={balance <= 0}
+            style={{ ...btn('#f59e0b'), opacity: balance <= 0 ? 0.5 : 1, cursor: balance <= 0 ? 'not-allowed' : 'pointer' }}
+          >Return Capital</button>
+        </div>
       </div>
 
       {summary && (
@@ -141,13 +222,13 @@ function OverviewTab({ business, summary }) {
       )}
 
       {declarable > 0 && (
-        <div style={{ background: '#fef9e7', border: '1px solid #fcd34d', padding: '16px', borderRadius: '12px' }}>
+        <div style={{ background: '#f3e8ff', border: '1px solid #c4b5fd', padding: '16px', borderRadius: '12px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
-              <div style={{ fontWeight: '600', color: '#92400e' }}>📤 Declare Profit to Pool</div>
-              <div style={{ fontSize: '12px', color: '#78350f', marginTop: '4px' }}>You can declare up to UGX {declarable.toLocaleString()} (keeping UGX {retention.toLocaleString()} retained).</div>
+              <div style={{ fontWeight: '600', color: '#5b21b6' }}>📤 Declare Profit to Pool</div>
+              <div style={{ fontSize: '12px', color: '#6d28d9', marginTop: '4px' }}>You can declare up to UGX {declarable.toLocaleString()} (keeping UGX {retention.toLocaleString()} retained).</div>
             </div>
-            <button onClick={() => setShowDeclare(true)} style={btn('#f59e0b')}>Declare Profit</button>
+            <button onClick={() => setShowDeclare(true)} style={btn('#7c3aed')}>Declare Profit</button>
           </div>
         </div>
       )}
@@ -163,8 +244,56 @@ function OverviewTab({ business, summary }) {
               <input type="text" value={declareNotes} onChange={e => setDeclareNotes(e.target.value)} style={input} />
             </Field>
             <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
-              <button onClick={submitDeclare} style={btn('#f59e0b')}>Confirm</button>
+              <button onClick={submitDeclare} style={btn('#7c3aed')}>Confirm</button>
               <button onClick={() => setShowDeclare(false)} style={btn('#6b7280')}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAllocate && (
+        <div style={modalBg}>
+          <div style={modalBox}>
+            <h3 style={{ marginTop: 0 }}>💰 Allocate Capital to {business.name}</h3>
+            <div style={{ background: '#e0f2fe', padding: '10px', borderRadius: '8px', marginBottom: '14px', fontSize: '13px', color: '#075985' }}>
+              <strong>Available in Club Capital:</strong> UGX {clubCapitalAvailable.toLocaleString()}
+            </div>
+            {allocateMsg && (
+              <div style={{ padding: '10px', borderRadius: '6px', marginBottom: '12px', background: allocateMsg.startsWith('✅') ? '#dcfce7' : '#fee2e2', color: allocateMsg.startsWith('✅') ? '#065f46' : '#991b1b', fontWeight: '600', fontSize: '13px' }}>{allocateMsg}</div>
+            )}
+            <Field label="Amount (UGX)">
+              <input type="number" value={allocateAmount} onChange={e => setAllocateAmount(e.target.value)} style={input} placeholder={`Max ${clubCapitalAvailable.toLocaleString()}`} />
+            </Field>
+            <Field label="Notes (optional)">
+              <input type="text" value={allocateNotes} onChange={e => setAllocateNotes(e.target.value)} style={input} placeholder="e.g., Initial stock purchase capital" />
+            </Field>
+            <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+              <button onClick={submitAllocate} style={btn('#0891b2')}>Confirm Allocation</button>
+              <button onClick={() => setShowAllocate(false)} style={btn('#6b7280')}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showReturn && (
+        <div style={modalBg}>
+          <div style={modalBox}>
+            <h3 style={{ marginTop: 0 }}>↩️ Return Capital from {business.name}</h3>
+            <div style={{ background: '#fef9e7', padding: '10px', borderRadius: '8px', marginBottom: '14px', fontSize: '13px', color: '#78350f' }}>
+              <strong>Business Balance:</strong> UGX {balance.toLocaleString()}
+            </div>
+            {returnMsg && (
+              <div style={{ padding: '10px', borderRadius: '6px', marginBottom: '12px', background: returnMsg.startsWith('✅') ? '#dcfce7' : '#fee2e2', color: returnMsg.startsWith('✅') ? '#065f46' : '#991b1b', fontWeight: '600', fontSize: '13px' }}>{returnMsg}</div>
+            )}
+            <Field label="Amount (UGX)">
+              <input type="number" value={returnAmount} onChange={e => setReturnAmount(e.target.value)} style={input} placeholder={`Max ${balance.toLocaleString()}`} />
+            </Field>
+            <Field label="Notes (optional)">
+              <input type="text" value={returnNotes} onChange={e => setReturnNotes(e.target.value)} style={input} />
+            </Field>
+            <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+              <button onClick={submitReturn} style={btn('#f59e0b')}>Confirm Return</button>
+              <button onClick={() => setShowReturn(false)} style={btn('#6b7280')}>Cancel</button>
             </div>
           </div>
         </div>
@@ -174,7 +303,7 @@ function OverviewTab({ business, summary }) {
 }
 
 // ==================== PRODUCTS ====================
-function ProductsTab({ businessId }) {
+function ProductsTab({ businessId, business, onRefresh }) {
   const [products, setProducts] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -183,6 +312,10 @@ function ProductsTab({ businessId }) {
     category: 'other', stock: 0, trackStock: false, lowStockThreshold: 5
   });
   const [loading, setLoading] = useState(true);
+
+  const [showPurchase, setShowPurchase] = useState(false);
+  const [purchaseForm, setPurchaseForm] = useState({ productId: '', quantity: '', unitCost: '', notes: '', date: new Date().toISOString().split('T')[0] });
+  const [purchaseMsg, setPurchaseMsg] = useState('');
 
   useEffect(() => { fetchProducts(); }, [businessId]);
 
@@ -202,10 +335,7 @@ function ProductsTab({ businessId }) {
     const method = editing ? 'PUT' : 'POST';
     const body = editing ? form : { ...form, businessId };
     try {
-      const res = await apiFetch(url, {
-        method,
-        body: JSON.stringify(body)
-      });
+      const res = await apiFetch(url, { method, body: JSON.stringify(body) });
       const d = await res.json();
       if (res.ok) {
         alert('✅ Saved');
@@ -234,13 +364,48 @@ function ProductsTab({ businessId }) {
     } catch (err) { alert('Network error'); }
   };
 
+  const submitPurchase = async () => {
+    setPurchaseMsg('');
+    if (!purchaseForm.productId) return setPurchaseMsg('❌ Select a product');
+    const qty = Number(purchaseForm.quantity);
+    const cost = Number(purchaseForm.unitCost);
+    if (!qty || qty <= 0) return setPurchaseMsg('❌ Enter a valid quantity');
+    if (!cost || cost < 0) return setPurchaseMsg('❌ Enter a valid unit cost');
+
+    try {
+      const res = await apiFetch('/api/business/purchase-stock', {
+        method: 'POST',
+        body: JSON.stringify({
+          businessId,
+          productId: purchaseForm.productId,
+          quantity: qty,
+          unitCost: cost,
+          description: purchaseForm.notes || `Stock purchase`,
+          date: purchaseForm.date,
+          createdBy: 'admin'
+        })
+      });
+      const d = await res.json();
+      if (res.ok) {
+        setPurchaseMsg('✅ ' + (d.message || 'Stock purchased'));
+        setPurchaseForm({ productId: '', quantity: '', unitCost: '', notes: '', date: new Date().toISOString().split('T')[0] });
+        setTimeout(() => { setShowPurchase(false); setPurchaseMsg(''); fetchProducts(); onRefresh(); }, 900);
+      } else setPurchaseMsg('❌ ' + (d.error || 'Failed'));
+    } catch (err) { setPurchaseMsg('❌ Network error'); }
+  };
+
   if (loading) return <div style={{ padding: '20px' }}>Loading products...</div>;
+
+  const totalPurchaseCost = (Number(purchaseForm.quantity) || 0) * (Number(purchaseForm.unitCost) || 0);
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h3 style={{ margin: 0 }}>📦 Products ({products.length})</h3>
-        <button onClick={() => { setShowAdd(true); setEditing(null); reset(); }} style={btn('#2563eb')}>➕ Add Product</button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button onClick={() => { setShowPurchase(true); setPurchaseMsg(''); }} style={btn('#0891b2')}>📥 Purchase Stock</button>
+          <button onClick={() => { setShowAdd(true); setEditing(null); reset(); }} style={btn('#2563eb')}>➕ Add Product</button>
+        </div>
       </div>
 
       {products.length === 0 ? (
@@ -324,6 +489,48 @@ function ProductsTab({ businessId }) {
           </div>
         </div>
       )}
+
+      {showPurchase && (
+        <div style={modalBg}>
+          <div style={modalBox}>
+            <h3 style={{ marginTop: 0 }}>📥 Purchase Stock</h3>
+            <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '12px' }}>
+              Increases stock and records an expense against the business fund.
+            </p>
+            <div style={{ background: '#e0f2fe', padding: '10px', borderRadius: '8px', marginBottom: '14px', fontSize: '13px', color: '#075985' }}>
+              <strong>Business balance:</strong> UGX {(Number(business.currentBalance) || 0).toLocaleString()}
+            </div>
+            {purchaseMsg && (
+              <div style={{ padding: '10px', borderRadius: '6px', marginBottom: '12px', background: purchaseMsg.startsWith('✅') ? '#dcfce7' : '#fee2e2', color: purchaseMsg.startsWith('✅') ? '#065f46' : '#991b1b', fontWeight: '600', fontSize: '13px' }}>{purchaseMsg}</div>
+            )}
+            <Field label="Product *">
+              <select value={purchaseForm.productId} onChange={e => {
+                const p = products.find(x => x._id === e.target.value);
+                setPurchaseForm({ ...purchaseForm, productId: e.target.value, unitCost: p?.costPrice || '' });
+              }} style={input}>
+                <option value="">-- Select product --</option>
+                {products.map(p => <option key={p._id} value={p._id}>{p.name} (Stock: {p.stock || 0})</option>)}
+              </select>
+            </Field>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <Field label="Quantity *"><input type="number" value={purchaseForm.quantity} onChange={e => setPurchaseForm({ ...purchaseForm, quantity: e.target.value })} style={input} /></Field>
+              <Field label="Unit Cost (UGX) *"><input type="number" value={purchaseForm.unitCost} onChange={e => setPurchaseForm({ ...purchaseForm, unitCost: e.target.value })} style={input} /></Field>
+            </div>
+            <Field label="Date"><input type="date" value={purchaseForm.date} onChange={e => setPurchaseForm({ ...purchaseForm, date: e.target.value })} style={input} /></Field>
+            <Field label="Notes (optional)"><input type="text" value={purchaseForm.notes} onChange={e => setPurchaseForm({ ...purchaseForm, notes: e.target.value })} style={input} placeholder="e.g., Supplier: ABC Ltd" /></Field>
+
+            <div style={{ background: '#0f3460', color: '#fff', padding: '12px 16px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', marginTop: '12px', fontSize: '15px', fontWeight: '700' }}>
+              <span>Total Purchase Cost</span>
+              <span>UGX {totalPurchaseCost.toLocaleString()}</span>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+              <button onClick={submitPurchase} style={btn('#0891b2')}>Confirm Purchase</button>
+              <button onClick={() => { setShowPurchase(false); setPurchaseMsg(''); }} style={btn('#6b7280')}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -335,6 +542,7 @@ function SalesTab({ businessId, businessName }) {
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
   const [search, setSearch] = useState('');
+  const [pdfModal, setPdfModal] = useState(null);
 
   const [form, setForm] = useState({
     customerName: '', customerContact: '',
@@ -473,7 +681,10 @@ function SalesTab({ businessId, businessName }) {
                   <td style={{ ...td, textAlign: 'right', fontWeight: '700' }}>UGX {Number(s.total || 0).toLocaleString()}</td>
                   <td style={{ ...td, textTransform: 'capitalize' }}>{s.paymentMethod.replace(/_/g, ' ')}</td>
                   <td style={td}>
-                    <a href={`${API}/api/business/sales/${s._id}/pdf`} target="_blank" rel="noopener noreferrer" style={btnMini('#7c3aed')}>📄 PDF</a>
+                    <button
+                      onClick={() => setPdfModal({ title: 'Sale Receipt', url: `${API}/api/business/sales/${s._id}/pdf` })}
+                      style={btnMini('#7c3aed')}
+                    >📄 PDF</button>
                   </td>
                 </tr>
               ))}
@@ -540,6 +751,14 @@ function SalesTab({ businessId, businessName }) {
             </div>
           </div>
         </div>
+      )}
+
+      {pdfModal && (
+        <PdfOptionsModal
+          title={pdfModal.title}
+          baseUrl={pdfModal.url}
+          onClose={() => setPdfModal(null)}
+        />
       )}
     </div>
   );

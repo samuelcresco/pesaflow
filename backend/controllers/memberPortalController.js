@@ -7,16 +7,13 @@ const Business = require('../models/Business');
 const Account = require('../models/Account');
 const Leader = require('../models/Leader');
 
+// Accounts that roll up into Club Capital
+const CLUB_CAPITAL_ACCOUNTS = ['1000', '1020', '1030', '1040', '1050', '1060', '1070'];
+
 // ==================== LOGIN ====================
 exports.login = async (req, res) => {
   try {
     const { memberNumber, password } = req.body;
-
-    console.log('LOGIN ATTEMPT:', {
-      memberNumber: JSON.stringify(memberNumber),
-      passwordLength: password ? password.length : 0,
-      passwordFirstChar: password ? password[0] : null
-    });
 
     if (!memberNumber || !password) {
       return res.status(400).json({ error: 'Member number and password required' });
@@ -30,13 +27,10 @@ exports.login = async (req, res) => {
     if (!member.active) return res.status(401).json({ error: 'Account is inactive' });
 
     if (!member.password) {
-      console.log('LOGIN: no password stored for', cleanNumber);
       return res.status(401).json({ error: 'No password set. Contact admin.' });
     }
 
     const isMatch = await member.comparePassword(cleanPassword);
-    console.log('LOGIN: bcrypt result =', isMatch);
-
     if (!isMatch) return res.status(401).json({ error: 'Invalid password' });
 
     res.json({
@@ -62,7 +56,6 @@ exports.forgotPassword = async (req, res) => {
     const member = await Member.findOne({ memberNumber });
     if (!member) return res.status(404).json({ error: 'Member not found' });
 
-    // Verify identity: phone OR email must match
     const phoneMatch = contact && member.contact === contact;
     const emailMatch = email && member.email === email;
 
@@ -125,13 +118,13 @@ exports.getMySavings = async (req, res) => {
     const member = await Member.findById(req.params.id);
     totals.total = Number(member?.savings) || 0;
     totals.locked = Number(member?.lockedSavings) || 0;
-    // 'available' removed
 
     res.json({ savings, totals });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
+
 // ==================== MY SHARES ====================
 exports.getMyShares = async (req, res) => {
   try {
@@ -224,22 +217,48 @@ exports.getMyDividends = async (req, res) => {
 // ==================== CLUB STATS ====================
 exports.getClubStats = async (req, res) => {
   try {
-    const members = await Member.find();
-    const savings = await Saving.find();
-    const businesses = await Business.find();
+    const members = await Member.find().lean();
+    const savings = await Saving.find().lean();
+    const businesses = await Business.find().lean();
 
-    const totalMemberSavings = members.reduce((s, m) => s + (m.savings || 0), 0);
-    const totalCapital = savings
-      .filter(s => ['misc', 'penalty', 'donation', 'membership', 'business_profit', 'shares'].includes(s.category))
-      .reduce((s, x) => s + x.amount, 0);
+    // ---- Member savings total (from Member documents) ----
+    const totalMemberSavings = members.reduce((s, m) => s + Number(m.savings || 0), 0);
 
+    // ---- Savings breakdown by category ----
+    const sumByCat = (cat) => savings
+      .filter(s => s.category === cat)
+      .reduce((s, x) => s + Number(x.amount || 0), 0);
+
+    const totalMonthly = sumByCat('monthly');
+    const totalExtra = sumByCat('extra');
+
+    // ---- Read account balances (single source of truth) ----
+    const accs = await Account.find({ code: { $in: CLUB_CAPITAL_ACCOUNTS } }).lean();
+    const balanceOf = (code) => {
+      const a = accs.find(x => x.code === code);
+      return Number(a?.balance) || 0;
+    };
+
+    const totalClubCapital = accs.reduce((s, a) => s + (Number(a.balance) || 0), 0);
+
+    const totalMembership = balanceOf('1020');
+    const totalSharesCapital = balanceOf('1030');
+    const totalConstitution = balanceOf('1040');
+    const totalPenalty = balanceOf('1050');
+    const totalMisc = balanceOf('1060');
+    const totalDonation = balanceOf('1070');
+    const totalShareValue = balanceOf('1030');
+    // ---- Grand total ----
+    const grandTotal = totalClubCapital + totalMemberSavings;
+
+    // ---- Total shares count ----
     const totalShares = members.reduce((s, m) =>
-      s + (m.shares.platinum || 0) + (m.shares.golden || 0) + (m.shares.silver || 0) + (m.shares.bronze || 0), 0);
+      s + Number(m.shares?.platinum || 0) +
+          Number(m.shares?.golden || 0) +
+          Number(m.shares?.silver || 0) +
+          Number(m.shares?.bronze || 0), 0);
 
-    const totalMisc = savings.filter(s => s.category === 'misc').reduce((s, x) => s + x.amount, 0);
-    const totalPenalty = savings.filter(s => s.category === 'penalty').reduce((s, x) => s + x.amount, 0);
-    const totalDonation = savings.filter(s => s.category === 'donation').reduce((s, x) => s + x.amount, 0);
-
+    // ---- Business stats ----
     const businessStats = businesses.map(b => ({
       name: b.name,
       currentBalance: b.currentBalance || 0,
@@ -247,16 +266,25 @@ exports.getClubStats = async (req, res) => {
     }));
 
     res.json({
-      totalClubCapital: totalCapital,
+      grandTotal,
+      totalClubCapital,
       totalMemberSavings,
-      totalShares,
-      totalMisc,
+      totalMonthly,
+      totalExtra,
+      totalMembership,
+      totalSharesCapital,
+      totalConstitution,
       totalPenalty,
+      totalMisc,
       totalDonation,
+      totalShareValue,
+      totalShares,
       totalMembers: members.length,
-      businessStats
+      businessStats,
+      lastUpdated: new Date()
     });
   } catch (error) {
+    console.error('Club stats error:', error.message);
     res.status(500).json({ error: error.message });
   }
 };
@@ -280,12 +308,10 @@ exports.applyForLoan = async (req, res) => {
     const member = await Member.findById(memberId);
     if (!member) return res.status(404).json({ error: 'Member not found' });
 
-    // Check if member already has an active loan
     if (member.activeLoanId) {
       return res.status(400).json({ error: 'You already have an active loan' });
     }
 
-    // Check loan limit
     const maxAmount = member.savings * 0.7;
     if (amount > maxAmount) {
       return res.status(400).json({ error: `Max loan is UGX ${maxAmount.toLocaleString()}` });
@@ -318,7 +344,6 @@ exports.applyForLoan = async (req, res) => {
     });
     await loan.save();
 
-    // Generate repayment schedule
     const installments = finalDuration * 4;
     const installmentAmount = totalRepayable / installments;
     const startDate = new Date();
@@ -343,5 +368,49 @@ exports.applyForLoan = async (req, res) => {
     res.status(201).json({ success: true, message: 'Loan application submitted', loan });
   } catch (error) {
     res.status(400).json({ error: error.message });
+  }
+};
+
+// ==================== MEMBER LOAN STATS ====================
+exports.getMemberLoanStats = async (req, res) => {
+  try {
+    const allLoans = await Loan.find({ status: { $in: ['disbursed', 'active', 'closed'] } });
+
+    const totalLoansOut = allLoans.reduce((s, l) => s + Number(l.amount || 0), 0);
+    const totalRepayable = allLoans.reduce((s, l) => s + Number(l.totalRepayable || 0), 0);
+
+    const paidReps = await Repayment.find({ status: 'paid' });
+
+    const totalRepaid = paidReps.reduce(
+      (s, r) => s + Number(r.amountPaid || r.amountDue || 0),
+      0
+    );
+
+    let totalInterestEarned = 0;
+    for (const loan of allLoans) {
+      const loanTotal = Number(loan.totalRepayable || 0);
+      const loanPrincipal = Number(loan.amount || 0);
+      if (loanTotal === 0) continue;
+
+      const interestRatio = (loanTotal - loanPrincipal) / loanTotal;
+
+      const loanPaid = paidReps
+        .filter(r => String(r.loanId) === String(loan._id))
+        .reduce((s, r) => s + Number(r.amountPaid || r.amountDue || 0), 0);
+
+      totalInterestEarned += loanPaid * interestRatio;
+    }
+
+    const outstanding = Math.max(0, totalRepayable - totalRepaid);
+
+    res.json({
+      totalLoansOut: Math.round(totalLoansOut),
+      totalRepaid: Math.round(totalRepaid),
+      outstanding: Math.round(outstanding),
+      totalInterestEarned: Math.round(totalInterestEarned)
+    });
+  } catch (err) {
+    console.error('getMemberLoanStats error:', err);
+    res.status(500).json({ error: err.message });
   }
 };

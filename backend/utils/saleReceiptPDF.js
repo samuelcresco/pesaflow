@@ -1,10 +1,11 @@
 const PDFDocument = require('pdfkit');
 const QRCode = require('qrcode');
 const Business = require('../models/Business');
+const Leader = require('../models/Leader');
+const { getLeaderSignature } = require('./leaderHelper');
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-UG');
 
-// Amount in words
 const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
   'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen',
   'Seventeen', 'Eighteen', 'Nineteen'];
@@ -38,7 +39,8 @@ function amountInWords(amount) {
   return parts.join(' ') + ' Shillings Only';
 }
 
-async function generateSaleReceiptPDF(sale, res) {
+async function generateSaleReceiptPDF(sale, res, requestedSigs) {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   const doc = new PDFDocument({ size: 'A5', margin: 0, layout: 'portrait' });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename=${sale.receiptNumber}.pdf`);
@@ -49,18 +51,15 @@ async function generateSaleReceiptPDF(sale, res) {
   const M = 30;
   const contentW = pageW - (M * 2);
 
-  // ---- Fetch business branding ----
   let biz = await Business.findById(sale.businessId);
   const bizName = biz?.name || sale.businessName || 'BUSINESS';
   const bizTagline = biz?.tagline || '';
   const bizContact = [biz?.contact, biz?.email, biz?.address].filter(Boolean).join('  •  ');
 
-  const accent = '#15803d'; // green for sales/receipts
+  const accent = '#15803d';
 
-  // Top bar
   doc.rect(0, 0, pageW, 6).fill(accent);
 
-  // Business header (dynamic)
   doc.fillColor('#0f3460').fontSize(14).font('Helvetica-Bold');
   doc.text(bizName.toUpperCase(), M, 18, { width: contentW, align: 'center' });
 
@@ -74,7 +73,6 @@ async function generateSaleReceiptPDF(sale, res) {
     doc.text(bizContact, M, 48, { width: contentW, align: 'center' });
   }
 
-  // Receipt title + number
   const rightW = 130;
   doc.font('Helvetica-Bold').fontSize(9).fillColor(accent);
   doc.text('SALE RECEIPT', pageW - M - rightW, 18, { width: rightW, align: 'right' });
@@ -85,10 +83,8 @@ async function generateSaleReceiptPDF(sale, res) {
   doc.font('Helvetica-Bold').fontSize(9).fillColor('#0f3460');
   doc.text(sale.receiptNumber, pageW - M - rightW, 42, { width: rightW, align: 'right' });
 
-  // Divider
   doc.moveTo(M, 68).lineTo(pageW - M, 68).strokeColor('#cbd5e1').lineWidth(1).stroke();
 
-  // Customer + date
   const dateStr = new Date(sale.date).toLocaleDateString('en-GB', {
     day: '2-digit', month: 'short', year: 'numeric'
   });
@@ -108,7 +104,6 @@ async function generateSaleReceiptPDF(sale, res) {
     y += 14;
   }
 
-  // ---- Items table ----
   y += 6;
   const colItemX = M + 8;
   const colQtyX = M + contentW - 175;
@@ -138,7 +133,6 @@ async function generateSaleReceiptPDF(sale, res) {
     rowIdx++;
   }
 
-  // Discount (if any)
   if (sale.discount > 0) {
     doc.font('Helvetica').fontSize(8).fillColor('#64748b');
     doc.text('Subtotal:', colPriceX - 40, y + 4, { width: 60, align: 'right' });
@@ -149,7 +143,6 @@ async function generateSaleReceiptPDF(sale, res) {
     y += 14;
   }
 
-  // Total
   y += 4;
   doc.rect(M, y, contentW, 26).fill(accent);
   doc.fillColor('#fff').font('Helvetica-Bold').fontSize(10);
@@ -157,12 +150,10 @@ async function generateSaleReceiptPDF(sale, res) {
   doc.fontSize(13).text(`UGX ${fmt(sale.total)}`, colAmtX - 30, y + 6, { width: colW + 30, align: 'right' });
   y += 32;
 
-  // Amount in words
   doc.fillColor('#334155').font('Helvetica-BoldOblique').fontSize(8);
   doc.text(amountInWords(sale.total), M, y, { width: contentW });
   y += 14;
 
-  // Payment method
   doc.font('Helvetica-Bold').fillColor('#64748b').fontSize(8);
   doc.text('Payment:', M, y);
   doc.font('Helvetica').fillColor('#1e293b').text(
@@ -170,10 +161,8 @@ async function generateSaleReceiptPDF(sale, res) {
     M + 50, y
   );
 
-  // ---- Bottom section: QR + Signatures ----
+  // ==================== DYNAMIC SIGNATURES ====================
   const bottomY = pageH - 120;
-
-  // QR
   const qrSize = 70;
   const qrX = M;
   try {
@@ -185,23 +174,44 @@ async function generateSaleReceiptPDF(sale, res) {
     doc.text('Scan to verify', qrX, bottomY + qrSize + 2, { width: qrSize, align: 'center' });
   } catch (e) { console.error('QR error:', e.message); }
 
-  // Signatures
-  const sigX = M + qrSize + 20;
-  const sigW = contentW - qrSize - 20;
-  const halfW = (sigW - 10) / 2;
+  const sigStartX = M + qrSize + 20;
+  const sigAreaW = contentW - qrSize - 20;
+  
+  // We reserve the right half for the customer signature, and dynamically split the left half for leaders
+  const customerSigW = 80;
+  const leaderAreaW = sigAreaW - customerSigW - 15;
+  
+  let signatories = requestedSigs && requestedSigs.length > 0 ? requestedSigs : ['treasurer'];
+  const numSigs = signatories.length;
+  const spacing = 10;
+  const sigW = (leaderAreaW - (numSigs - 1) * spacing) / numSigs;
 
-  doc.moveTo(sigX, bottomY + 40).lineTo(sigX + halfW, bottomY + 40).strokeColor('#1e293b').lineWidth(0.8).stroke();
-  doc.font('Helvetica-Bold').fillColor(accent).fontSize(7);
-  doc.text('SOLD BY', sigX, bottomY + 45, { width: halfW });
-  doc.font('Helvetica-Bold').fillColor('#1e293b').fontSize(8);
-  doc.text(sale.soldBy || '__________________', sigX, bottomY + 58, { width: halfW });
+  for (let i = 0; i < numSigs; i++) {
+    const role = signatories[i];
+    const x = sigStartX + i * (sigW + spacing);
+    
+    const leader = await Leader.findOne({ role, active: true });
+    const sigBuffer = await getLeaderSignature(role);
 
-  const custX = sigX + halfW + 10;
-  doc.moveTo(custX, bottomY + 40).lineTo(custX + halfW, bottomY + 40).strokeColor('#1e293b').lineWidth(0.8).stroke();
-  doc.font('Helvetica-Bold').fillColor(accent).fontSize(7);
-  doc.text('CUSTOMER SIGNATURE', custX, bottomY + 45, { width: halfW });
+    doc.moveTo(x, bottomY + 40).lineTo(x + sigW, bottomY + 40).strokeColor('#1e293b').lineWidth(0.8).stroke();
+    
+    if (sigBuffer) {
+      try {
+        doc.image(sigBuffer, x, bottomY + 22, { fit: [sigW, 15], align: 'center', valign: 'bottom' });
+      } catch (e) {}
+    }
 
-  // Footer
+    doc.font('Helvetica-Bold').fillColor(accent).fontSize(6.5);
+    doc.text(role.replace(/_/g, ' ').toUpperCase(), x, bottomY + 45, { width: sigW, align: 'center' });
+    doc.font('Helvetica-Bold').fillColor('#1e293b').fontSize(7.5);
+    doc.text(leader?.name || '__________________', x, bottomY + 56, { width: sigW, align: 'center' });
+  }
+
+  const custX = sigStartX + leaderAreaW + 15;
+  doc.moveTo(custX, bottomY + 40).lineTo(custX + customerSigW, bottomY + 40).strokeColor('#1e293b').lineWidth(0.8).stroke();
+  doc.font('Helvetica-Bold').fillColor(accent).fontSize(6.5);
+  doc.text('CUSTOMER', custX, bottomY + 45, { width: customerSigW, align: 'center' });
+
   doc.font('Helvetica-Oblique').fontSize(6).fillColor('#94a3b8');
   doc.text('Thank you for your business!', 0, pageH - 20, { align: 'center', width: pageW });
 

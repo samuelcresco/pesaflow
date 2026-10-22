@@ -49,16 +49,19 @@ export default function Dashboard() {
     { title: 'Expenses', desc: 'Club & business expenses', icon: '🧮', href: '/expenses', bg: '#fee2e2', id: 'expenses' },
     { title: 'Delivery Notes', desc: 'Goods delivered to recipients', icon: '📄', href: '/delivery-notes', bg: '#cffafe', id: 'delivery-notes' },
     { title: 'Reports', desc: 'Analytics, P&L, Balance Sheet', icon: '📈', href: '/reports', bg: '#cffafe', id: 'reports' },
+    { title: 'Letters & Recommendations', desc: 'Appointments, recommendations, certificates', icon: '📝', href: '/letters', bg: '#f3e8ff', id: 'letters' },
     { title: 'Share Settings', desc: 'Prices, dividends, eligibility', icon: '⚙️', href: '/admin/share-settings', bg: '#e5e7eb', id: 'share-settings' },
+    { title: 'Constitution', desc: 'Upload & manage access', icon: '📖', href: '/admin/constitution', bg: '#fef9e7', id: 'share-settings' },
+    { title: 'Membership', desc: 'Renewals & certificates', icon: '🎫', href: '/admin/membership', bg: '#e0e7ff', id: 'share-settings' },
     { title: 'Leaders', desc: 'Leadership & logins', icon: '🏛️', href: '/admin/leaders', bg: '#fef3c7', id: 'leaders' },
     { title: 'Club Profile', desc: 'Club details for PDFs', icon: '🏢', href: '/admin/club-profile', bg: '#dbeafe', id: 'club-profile' }
   ];
 
   const ROLE_PREVIEW = {
-    president: ['members','savings','loans','withdrawals','receipts','statements','business','dividends','investments','expenses','delivery-notes','reports','share-settings','leaders','club-profile'],
-    vice_president: ['members','savings','loans','withdrawals','receipts','statements','business','dividends','investments','expenses','delivery-notes','reports','share-settings','leaders','club-profile'],
-    secretary: ['members','savings','receipts','statements','reports'],
-    treasurer: ['savings','withdrawals','receipts','statements','dividends','expenses','reports'],
+    president: ['members','savings','loans','withdrawals','receipts','statements','business','dividends','investments','expenses','delivery-notes','reports','letters','share-settings','leaders','club-profile'],
+    vice_president: ['members','savings','loans','withdrawals','receipts','statements','business','dividends','investments','expenses','delivery-notes','reports','letters','share-settings','leaders','club-profile'],
+    secretary: ['members','savings','receipts','statements','reports','letters'],
+    treasurer: ['savings','withdrawals','receipts','statements','dividends','expenses','reports','letters'],
     chairman_loan_committee: ['loans','statements','reports'],
     treasurer_loan_committee: ['loans','statements','reports'],
     loan_officer_1: ['loans'],

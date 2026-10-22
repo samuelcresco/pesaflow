@@ -79,11 +79,19 @@ exports.downloadVoucherPDF = async (req, res) => {
     const voucher = await PaymentVoucher.findById(req.params.id);
     if (!voucher) return res.status(404).json({ error: 'Voucher not found' });
 
+    // Stop the browser from caching the old PDF
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
     voucher.printedCount = (voucher.printedCount || 0) + 1;
     voucher.lastPrintedAt = new Date();
     await voucher.save();
 
-    await generatePaymentVoucherPDF(voucher, res);
+    // Extract selected signatories from the query string
+    const requestedSigs = req.query.signatories ? req.query.signatories.split(',') : [];
+
+    await generatePaymentVoucherPDF(voucher, res, requestedSigs);
   } catch (error) {
     console.error('VOUCHER PDF ERROR:', error.message);
     if (!res.headersSent) res.status(500).json({ error: error.message });

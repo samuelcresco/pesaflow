@@ -3,10 +3,10 @@ const QRCode = require('qrcode');
 const ClubProfile = require('../models/ClubProfile');
 const Business = require('../models/Business');
 const Leader = require('../models/Leader');
+const { getLeaderSignature } = require('./leaderHelper');
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-UG');
 
-// Amount in words
 const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
   'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen',
   'Seventeen', 'Eighteen', 'Nineteen'];
@@ -40,7 +40,8 @@ function amountInWords(amount) {
   return parts.join(' ') + ' Shillings Only';
 }
 
-async function generatePaymentVoucherPDF(voucher, res) {
+async function generatePaymentVoucherPDF(voucher, res, requestedSigs) {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   const doc = new PDFDocument({ size: 'A5', margin: 0, layout: 'portrait' });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename=${voucher.voucherNumber}.pdf`);
@@ -51,7 +52,6 @@ async function generatePaymentVoucherPDF(voucher, res) {
   const M = 30;
   const contentW = pageW - (M * 2);
 
-  // ---- Fetch club / business header ----
   let profile = await ClubProfile.findOne();
   if (!profile) profile = {};
 
@@ -71,16 +71,10 @@ async function generatePaymentVoucherPDF(voucher, res) {
     }
   }
 
-  const leaders = await Leader.find().sort('order');
-  const treasurer = leaders.find(l => l.role === 'treasurer');
-  const president = leaders.find(l => l.role === 'president');
-
   const accent = voucher.voucherFor === 'business' ? '#7c3aed' : '#0f3460';
 
-  // ---- Top color bar ----
   doc.rect(0, 0, pageW, 6).fill(accent);
 
-  // ---- Header ----
   doc.fillColor(accent).fontSize(12).font('Helvetica-Bold');
   doc.text('PAYMENT VOUCHER', 0, 16, { align: 'center', width: pageW });
 
@@ -97,16 +91,13 @@ async function generatePaymentVoucherPDF(voucher, res) {
     doc.text(headerContact, M, 60, { width: contentW, align: 'center' });
   }
 
-  // Voucher number (top right)
   doc.font('Helvetica').fontSize(7).fillColor('#94a3b8');
   doc.text('Voucher No.', pageW - 130, 20, { width: 100, align: 'right' });
   doc.font('Helvetica-Bold').fontSize(9).fillColor(accent);
   doc.text(voucher.voucherNumber, pageW - 130, 30, { width: 100, align: 'right' });
 
-  // Divider
   doc.moveTo(M, 78).lineTo(pageW - M, 78).strokeColor('#cbd5e1').lineWidth(1).stroke();
 
-  // ---- Meta row ----
   const dateStr = new Date(voucher.date).toLocaleDateString('en-GB', {
     day: '2-digit', month: 'short', year: 'numeric'
   });
@@ -122,7 +113,6 @@ async function generatePaymentVoucherPDF(voucher, res) {
 
   y += 16;
 
-  // ---- Payee & Cashier ----
   doc.fillColor(accent).fontSize(9).font('Helvetica-Bold');
   doc.text('PAID TO:', M, y);
   doc.font('Helvetica-Bold').fontSize(11).fillColor('#1e293b');
@@ -136,7 +126,6 @@ async function generatePaymentVoucherPDF(voucher, res) {
     y += 14;
   }
 
-  // ---- Line items table ----
   y += 4;
   const colDescX = M + 8;
   const colCatX = M + contentW - 200;
@@ -162,7 +151,6 @@ async function generatePaymentVoucherPDF(voucher, res) {
     rowIdx++;
   }
 
-  // Total row
   y += 3;
   doc.rect(M, y, contentW, 26).fill(accent);
   doc.fillColor('#fff').font('Helvetica-Bold').fontSize(10);
@@ -170,24 +158,21 @@ async function generatePaymentVoucherPDF(voucher, res) {
   doc.fontSize(12).text(`UGX ${fmt(voucher.totalAmount)}`, colAmtX - 20, y + 6, { width: colAmtW + 20, align: 'right' });
   y += 32;
 
-  // Amount in words
   doc.fillColor('#334155').font('Helvetica-BoldOblique').fontSize(8);
   doc.text(amountInWords(voucher.totalAmount), M, y, { width: contentW });
   y += 14;
 
-  // Notes
   if (voucher.notes) {
     doc.font('Helvetica-Bold').fillColor('#64748b').fontSize(7.5);
     doc.text('Notes: ', M, y);
     doc.font('Helvetica').fillColor('#1e293b').text(voucher.notes, M + 35, y, { width: contentW - 35 });
   }
 
-  // ---- Bottom section: QR + Signatures ----
+  // ==================== DYNAMIC SIGNATURES ====================
   const bottomY = pageH - 125;
-
-  // QR
   const qrSize = 75;
   const qrX = M;
+  
   try {
     const qrUrl = `http://192.168.1.6:5000/api/expenses/vouchers/verify/${voucher.voucherNumber}`;
     const qrDataUrl = await QRCode.toDataURL(qrUrl, { margin: 1, width: qrSize });
@@ -195,35 +180,39 @@ async function generatePaymentVoucherPDF(voucher, res) {
     doc.image(qrBuffer, qrX, bottomY, { width: qrSize, height: qrSize });
     doc.font('Helvetica').fontSize(6).fillColor('#64748b');
     doc.text('Scan to verify', qrX, bottomY + qrSize + 2, { width: qrSize, align: 'center' });
-  } catch (e) {
-    console.error('QR error:', e.message);
+  } catch (e) { console.error('QR error:', e.message); }
+
+  const sigStartX = M + qrSize + 15;
+  const sigAreaW = contentW - qrSize - 15;
+  
+  let signatories = requestedSigs && requestedSigs.length > 0 ? requestedSigs : ['treasurer', 'president'];
+  const numSigs = signatories.length;
+  const spacing = 15;
+  const sigW = (sigAreaW - (numSigs - 1) * spacing) / numSigs;
+
+  for (let i = 0; i < numSigs; i++) {
+    const role = signatories[i];
+    const x = sigStartX + i * (sigW + spacing);
+    
+    const leader = await Leader.findOne({ role, active: true });
+    const sigBuffer = await getLeaderSignature(role);
+
+    doc.moveTo(x, bottomY + 45).lineTo(x + sigW, bottomY + 45).strokeColor('#1e293b').lineWidth(0.8).stroke();
+    
+    if (sigBuffer) {
+      try {
+        doc.image(sigBuffer, x, bottomY + 25, { fit: [sigW, 18], align: 'center', valign: 'bottom' });
+      } catch (e) {}
+    }
+
+    doc.font('Helvetica-Bold').fillColor(accent).fontSize(7);
+    doc.text(role.replace(/_/g, ' ').toUpperCase(), x, bottomY + 50, { width: sigW, align: 'center' });
+    doc.font('Helvetica-Bold').fillColor('#1e293b').fontSize(8);
+    doc.text(leader?.name || '__________________', x, bottomY + 62, { width: sigW, align: 'center' });
+    doc.font('Helvetica').fillColor('#94a3b8').fontSize(6.5);
+    doc.text('Date: ____________', x, bottomY + 76, { width: sigW, align: 'center' });
   }
 
-  // Signatures
-  const sigX = M + qrSize + 15;
-  const sigW = contentW - qrSize - 15;
-  const halfW = (sigW - 10) / 2;
-
-  // Treasurer
-  doc.moveTo(sigX, bottomY + 45).lineTo(sigX + halfW, bottomY + 45).strokeColor('#1e293b').lineWidth(0.8).stroke();
-  doc.font('Helvetica-Bold').fillColor(accent).fontSize(7);
-  doc.text('TREASURER', sigX, bottomY + 50, { width: halfW });
-  doc.font('Helvetica-Bold').fillColor('#1e293b').fontSize(8);
-  doc.text(treasurer?.name || '__________________', sigX, bottomY + 62, { width: halfW });
-  doc.font('Helvetica').fillColor('#94a3b8').fontSize(6.5);
-  doc.text('Date: ____________', sigX, bottomY + 76, { width: halfW });
-
-  // President (or Business Manager)
-  const presX = sigX + halfW + 10;
-  doc.moveTo(presX, bottomY + 45).lineTo(presX + halfW, bottomY + 45).strokeColor('#1e293b').lineWidth(0.8).stroke();
-  doc.font('Helvetica-Bold').fillColor(accent).fontSize(7);
-  doc.text(voucher.voucherFor === 'business' ? 'BUSINESS MANAGER' : 'PRESIDENT', presX, bottomY + 50, { width: halfW });
-  doc.font('Helvetica-Bold').fillColor('#1e293b').fontSize(8);
-  doc.text(president?.name || '__________________', presX, bottomY + 62, { width: halfW });
-  doc.font('Helvetica').fillColor('#94a3b8').fontSize(6.5);
-  doc.text('Date: ____________', presX, bottomY + 76, { width: halfW });
-
-  // Footer
   doc.font('Helvetica-Oblique').fontSize(6).fillColor('#94a3b8');
   doc.text('This is a computer-generated payment voucher.', 0, pageH - 20, { align: 'center', width: pageW });
 

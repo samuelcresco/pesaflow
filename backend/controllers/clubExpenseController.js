@@ -3,7 +3,7 @@ const PaymentVoucher = require('../models/PaymentVoucher');
 const { createJournalEntry } = require('../utils/journalHelper');
 const { generateVoucherNumber } = require('../utils/voucherNumber');
 
-// ==================== CREATE CLUB EXPENSE (single or multi) ====================
+// ==================== CREATE EXPENSE (single or multi, club or loan) ====================
 exports.createExpense = async (req, res) => {
   try {
     const {
@@ -18,11 +18,14 @@ exports.createExpense = async (req, res) => {
       createdBy,
       items,
       notes,
-      batchId
+      batchId,
+      scope
     } = req.body;
 
     const expDate = date ? new Date(date) : new Date();
     const finalBatchId = batchId || `BATCH-${Date.now()}`;
+    const isLoan = scope === 'loan';
+    const finalScope = isLoan ? 'loan' : 'club';
 
     // ==================== MULTI-ENTRY MODE ====================
     if (items && Array.isArray(items) && items.length > 0) {
@@ -40,6 +43,7 @@ exports.createExpense = async (req, res) => {
           description: item.description || 'Expense',
           amount: itemAmount,
           category: item.category || 'other',
+          scope: finalScope,
           date: expDate,
           paidTo: item.payee || payee || '',
           payee: item.payee || payee || '',
@@ -52,18 +56,52 @@ exports.createExpense = async (req, res) => {
         try {
           const journal = await createJournalEntry({
             date: expDate,
-            description: `Club expense: ${exp.description}`,
+            description: isLoan ? `Loan expense: ${exp.description}` : `Club expense: ${exp.description}`,
             reference: exp._id.toString(),
-            sourceType: 'club_expense',
-            lines: [
-              { accountCode: '4010', debit: itemAmount },
-              { accountCode: '1000', credit: itemAmount }
-            ],
+            sourceType: isLoan ? 'loan_expense' : 'club_expense',
+            lines: isLoan
+              ? [
+                  { accountCode: '4030', debit: itemAmount },
+                  { accountCode: '1100', credit: itemAmount }
+                ]
+              : [
+                  { accountCode: '4010', debit: itemAmount },
+                  { accountCode: '1000', credit: itemAmount }
+                ],
             createdBy: createdBy || 'admin'
           });
           exp.journalEntryId = journal._id;
           await exp.save();
-        } catch (e) { console.error('Journal error:', e.message); }
+        } catch (e) {
+          console.error('Journal error:', e.message);
+        }
+
+        if (isLoan) {
+          const Account = require('../models/Account');
+          const Business = require('../models/Business');
+          const BusinessTransaction = require('../models/BusinessTransaction');
+
+          const loanAcc = await Account.findOne({ code: '1100' });
+          if (loanAcc) {
+            loanAcc.balance = (Number(loanAcc.balance) || 0) - itemAmount;
+            await loanAcc.save();
+          }
+
+          const loanBiz = await Business.findOne({ isSystem: true, type: 'loan' });
+          if (loanBiz) {
+            try {
+              await BusinessTransaction.create({
+                businessId: loanBiz._id,
+                type: 'expense',
+                amount: itemAmount,
+                description: exp.description,
+                category: exp.category,
+                sourceType: 'loan',
+                date: expDate
+              });
+            } catch (e) { console.error('Loan BusinessTransaction error:', e.message); }
+          }
+        }
 
         createdExpenses.push(exp);
         grandTotal += itemAmount;
@@ -94,7 +132,7 @@ exports.createExpense = async (req, res) => {
 
         voucher = await PaymentVoucher.create({
           voucherNumber,
-          voucherFor: 'club',
+          voucherFor: finalScope,
           payee: voucherPayee,
           cashier: voucherCashier,
           lineItems: voucherLines,
@@ -114,7 +152,7 @@ exports.createExpense = async (req, res) => {
 
       return res.status(201).json({
         success: true,
-        message: `${createdExpenses.length} expense(s) recorded${voucher ? `, voucher ${voucher.voucherNumber} generated` : ''}`,
+        message: `${createdExpenses.length} ${finalScope} expense(s) recorded${voucher ? `, voucher ${voucher.voucherNumber} generated` : ''}`,
         expenses: createdExpenses,
         voucher
       });
@@ -132,6 +170,7 @@ exports.createExpense = async (req, res) => {
       description,
       amount: Number(amount),
       category: category || 'other',
+      scope: finalScope,
       date: expDate,
       paidTo: paidTo || payee || '',
       payee: payee || paidTo || '',
@@ -144,18 +183,52 @@ exports.createExpense = async (req, res) => {
     try {
       const journal = await createJournalEntry({
         date: expDate,
-        description: `Club expense: ${description}`,
+        description: isLoan ? `Loan expense: ${description}` : `Club expense: ${description}`,
         reference: expense._id.toString(),
-        sourceType: 'club_expense',
-        lines: [
-          { accountCode: '4010', debit: Number(amount) },
-          { accountCode: '1000', credit: Number(amount) }
-        ],
+        sourceType: isLoan ? 'loan_expense' : 'club_expense',
+        lines: isLoan
+          ? [
+              { accountCode: '4030', debit: Number(amount) },
+              { accountCode: '1100', credit: Number(amount) }
+            ]
+          : [
+              { accountCode: '4010', debit: Number(amount) },
+              { accountCode: '1000', credit: Number(amount) }
+            ],
         createdBy: createdBy || 'admin'
       });
       expense.journalEntryId = journal._id;
       await expense.save();
-    } catch (e) { console.error('Journal error:', e.message); }
+    } catch (e) {
+      console.error('Journal error:', e.message);
+    }
+
+    if (isLoan) {
+      const Account = require('../models/Account');
+      const Business = require('../models/Business');
+      const BusinessTransaction = require('../models/BusinessTransaction');
+
+      const loanAcc = await Account.findOne({ code: '1100' });
+      if (loanAcc) {
+        loanAcc.balance = (Number(loanAcc.balance) || 0) - Number(amount);
+        await loanAcc.save();
+      }
+
+      const loanBiz = await Business.findOne({ isSystem: true, type: 'loan' });
+      if (loanBiz) {
+        try {
+          await BusinessTransaction.create({
+            businessId: loanBiz._id,
+            type: 'expense',
+            amount: Number(amount),
+            description,
+            category: category || 'other',
+            sourceType: 'loan',
+            date: expDate
+          });
+        } catch (e) { console.error('Loan BusinessTransaction error:', e.message); }
+      }
+    }
 
     let voucher = null;
     if (expense.payee) {
@@ -168,7 +241,7 @@ exports.createExpense = async (req, res) => {
 
       voucher = await PaymentVoucher.create({
         voucherNumber,
-        voucherFor: 'club',
+        voucherFor: finalScope,
         payee: expense.payee,
         cashier: expense.cashier,
         lineItems: [{
@@ -199,8 +272,10 @@ exports.createExpense = async (req, res) => {
 // ==================== GET ALL EXPENSES ====================
 exports.getAllExpenses = async (req, res) => {
   try {
-    const { month, year, category, startDate, endDate, search } = req.query;
+    const { month, year, category, startDate, endDate, search, scope } = req.query;
     const filter = {};
+
+    if (scope) filter.scope = scope;
     if (month) filter.month = parseInt(month);
     if (year) filter.year = parseInt(year);
     if (category) filter.category = category;
@@ -231,8 +306,10 @@ exports.getAllExpenses = async (req, res) => {
 // ==================== GET CATEGORY TOTALS ====================
 exports.getCategoryTotals = async (req, res) => {
   try {
-    const { year, month } = req.query;
+    const { year, month, scope } = req.query;
     const filter = {};
+
+    if (scope) filter.scope = scope;
     if (year) filter.year = parseInt(year);
     if (month) filter.month = parseInt(month);
 
@@ -273,17 +350,24 @@ exports.deleteExpense = async (req, res) => {
     const expense = await ClubExpense.findById(req.params.id);
     if (!expense) return res.status(404).json({ error: 'Expense not found' });
 
-    // 1. Reverse the journal — Debit Club Capital / Credit Club Expenses
+    const isLoan = expense.scope === 'loan';
+
+    // 1. Reverse the journal
     try {
       await createJournalEntry({
         date: new Date(),
-        description: `REVERSAL of club expense: ${expense.description} (deleted)`,
+        description: `REVERSAL of ${isLoan ? 'loan' : 'club'} expense: ${expense.description} (deleted)`,
         reference: expense._id.toString(),
-        sourceType: 'club_expense',
-        lines: [
-          { accountCode: '1000', debit: Number(expense.amount) },   // restore Club Capital
-          { accountCode: '4010', credit: Number(expense.amount) }   // reverse the expense
-        ],
+        sourceType: isLoan ? 'loan_expense' : 'club_expense',
+        lines: isLoan
+          ? [
+              { accountCode: '1100', debit: Number(expense.amount) },
+              { accountCode: '4030', credit: Number(expense.amount) }
+            ]
+          : [
+              { accountCode: '1000', debit: Number(expense.amount) },
+              { accountCode: '4010', credit: Number(expense.amount) }
+            ],
         createdBy: req.body?.deletedBy || 'admin'
       });
     } catch (e) {
@@ -291,16 +375,24 @@ exports.deleteExpense = async (req, res) => {
       return res.status(500).json({ error: 'Failed to reverse journal: ' + e.message });
     }
 
-    // 2. If the expense has a linked voucher, soft-delete it too
+    // 2. Restore the Loan Fund balance
+    if (isLoan) {
+      const Account = require('../models/Account');
+      const loanAcc = await Account.findOne({ code: '1100' });
+      if (loanAcc) {
+        loanAcc.balance = (Number(loanAcc.balance) || 0) + Number(expense.amount);
+        await loanAcc.save();
+      }
+    }
+
+    // 3. Soft-delete the linked voucher if no other expenses use it
     if (expense.voucherId) {
       const voucher = await PaymentVoucher.findById(expense.voucherId);
       if (voucher && voucher.status !== 'deleted') {
-        // Check if this voucher covers only this expense
         const otherExpenses = await ClubExpense.countDocuments({
           _id: { $ne: expense._id },
           voucherId: expense.voucherId
         });
-        // If no other expenses use this voucher, delete it
         if (otherExpenses === 0) {
           voucher.status = 'deleted';
           voucher.deletedReason = `Parent expense deleted: ${expense.description}`;
@@ -311,12 +403,12 @@ exports.deleteExpense = async (req, res) => {
       }
     }
 
-    // 3. Delete the expense record
+    // 4. Delete the expense record
     await ClubExpense.findByIdAndDelete(expense._id);
 
     res.json({
       success: true,
-      message: `Expense "${expense.description}" (UGX ${Number(expense.amount).toLocaleString()}) deleted. Club Capital restored.`,
+      message: `${isLoan ? 'Loan' : 'Club'} expense "${expense.description}" (UGX ${Number(expense.amount).toLocaleString()}) deleted. ${isLoan ? 'Loan Fund' : 'Club Capital'} restored.`,
       restoredAmount: expense.amount
     });
   } catch (error) {

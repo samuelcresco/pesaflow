@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { apiFetch, API } from '../api-client';
+import PdfOptionsModal from '../../components/PdfOptionsModal';
 
 export default function DeliveryNotesPage() {
   const [notes, setNotes] = useState([]);
@@ -9,6 +10,7 @@ export default function DeliveryNotesPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [pdfModal, setPdfModal] = useState(null);
 
   const emptyForm = {
     recipientName: '', recipientContact: '', recipientAddress: '',
@@ -166,7 +168,10 @@ export default function DeliveryNotesPage() {
                   </td>
                   <td style={td}>
                     <div style={{ display: 'flex', gap: '4px', whiteSpace: 'nowrap' }}>
-                      <a href={`${API}/api/delivery-notes/${n._id}/pdf`} target="_blank" rel="noopener noreferrer" style={btnMini('#7c3aed')}>📄</a>
+                      <button
+                        onClick={() => setPdfModal({ title: 'Delivery Note', url: `${API}/api/delivery-notes/${n._id}/pdf` })}
+                        style={btnMini('#7c3aed')}
+                      >📄 PDF</button>
                       {n.status === 'issued' && <button onClick={() => markDelivered(n._id)} style={btnMini('#22c55e')}>✓ Delivered</button>}
                       {n.status !== 'cancelled' && <button onClick={() => cancelNote(n._id, n.noteNumber)} style={btnMini('#f59e0b')}>⊘</button>}
                       <button onClick={() => deleteNote(n._id, n.noteNumber)} style={btnMini('#dc2626')}>🗑</button>
@@ -218,6 +223,14 @@ export default function DeliveryNotesPage() {
             <button onClick={() => setShowCreate(false)} style={btn('#6b7280')}>Cancel</button>
           </div>
         </Modal>
+      )}
+
+      {pdfModal && (
+        <PdfOptionsModal
+          title={pdfModal.title}
+          baseUrl={pdfModal.url}
+          onClose={() => setPdfModal(null)}
+        />
       )}
     </div>
   );

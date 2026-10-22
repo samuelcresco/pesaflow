@@ -1,6 +1,10 @@
 // Central API client — attaches user identity to every request
 
-export const API = process.env.NEXT_PUBLIC_API_URL || 'https://pesaflow-api-jpll.onrender.com';
+// Uses environment variable if set, otherwise falls back to localhost
+// For local dev: leave NEXT_PUBLIC_API_URL unset → uses http://localhost:5000
+// For cloud: set NEXT_PUBLIC_API_URL in Render environment variables
+export const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+
 export async function apiFetch(path, options = {}) {
   const headers = {
     'Content-Type': 'application/json',

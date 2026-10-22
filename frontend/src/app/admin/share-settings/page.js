@@ -9,7 +9,6 @@ export default function ShareSettings() {
   const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Certificate state
   const [members, setMembers] = useState([]);
   const [certificates, setCertificates] = useState([]);
   const [certSearch, setCertSearch] = useState('');
@@ -35,7 +34,7 @@ export default function ShareSettings() {
 
   const fetchMembers = async () => {
     try {
-     const res = await apiFetch('/api/members');
+      const res = await apiFetch('/api/members');
       const data = await res.json();
       setMembers(Array.isArray(data) ? data : []);
     } catch (err) { console.error(err); }
@@ -43,7 +42,7 @@ export default function ShareSettings() {
 
   const fetchCertificates = async () => {
     try {
-     const res = await apiFetch('/api/share-certificates');
+      const res = await apiFetch('/api/share-certificates');
       const data = await res.json();
       setCertificates(data.certificates || []);
     } catch (err) { console.error(err); }
@@ -82,6 +81,14 @@ export default function ShareSettings() {
     });
   };
 
+  const updateProcessingFee = (value) => {
+    setSettings({ ...settings, loanProcessingFeePercent: parseFloat(value) || 0 });
+  };
+
+  const updateConstitutionFee = (value) => {
+    setSettings({ ...settings, constitutionFee: parseFloat(value) || 0 });
+  };
+
   const dividendTotal = () => {
     const d = settings.dividendPercentages || {};
     return (d.ordinary || 0) + (d.silver || 0) + (d.golden || 0) + (d.platinum || 0);
@@ -92,9 +99,9 @@ export default function ShareSettings() {
     setMessage('');
     try {
       const res = await apiFetch('/api/settings/shares', {
-  method: 'PUT',
-  body: JSON.stringify(settings)
-});
+        method: 'PUT',
+        body: JSON.stringify(settings)
+      });
       const data = await res.json();
       if (res.ok) {
         setMessage('✅ Settings saved successfully');
@@ -115,12 +122,8 @@ export default function ShareSettings() {
     setIssueMsg('');
     try {
       const res = await apiFetch('/api/share-certificates/issue', {
-  method: 'POST',
-  body: JSON.stringify({
-          memberId: issueMemberId,
-          notes: issueNotes,
-          issuedBy: 'admin'
-        })
+        method: 'POST',
+        body: JSON.stringify({ memberId: issueMemberId, notes: issueNotes, issuedBy: 'admin' })
       });
       const d = await res.json();
       if (res.ok) {
@@ -147,9 +150,9 @@ export default function ShareSettings() {
     if (!reason) return;
     try {
       const res = await apiFetch(`/api/share-certificates/${id}/cancel`, {
-  method: 'POST',
-  body: JSON.stringify({ reason, cancelledBy: 'admin' })
-});
+        method: 'POST',
+        body: JSON.stringify({ reason, cancelledBy: 'admin' })
+      });
       const d = await res.json();
       if (res.ok) {
         alert('✅ Certificate cancelled');
@@ -159,7 +162,7 @@ export default function ShareSettings() {
   };
 
   const deleteCertificate = async (id, certNumber) => {
-    if (!confirm(`⚠️ PERMANENTLY DELETE certificate ${certNumber}?\n\nThis removes it from the database FOREVER. Cannot be undone.\n\nIf you just want to invalidate it but keep the record, use "Cancel" instead.`)) return;
+    if (!confirm(`⚠️ PERMANENTLY DELETE certificate ${certNumber}?\n\nThis removes it from the database FOREVER. Cannot be undone.`)) return;
     const secondConfirm = prompt(`Type DELETE (in caps) to confirm permanent deletion of ${certNumber}:`);
     if (secondConfirm !== 'DELETE') {
       alert('Deletion cancelled.');
@@ -194,7 +197,7 @@ export default function ShareSettings() {
   return (
     <div style={{ padding: '24px', maxWidth: '1000px', margin: '0 auto', fontFamily: 'Segoe UI, sans-serif' }}>
       <h1>⚙️ Share Settings</h1>
-      <p style={{ color: '#64748b' }}>Configure share prices, dividend distribution, loan eligibility, and issue certificates.</p>
+      <p style={{ color: '#64748b' }}>Configure share prices, dividend distribution, loan eligibility, fees, and certificates.</p>
 
       {message && (
         <div style={{
@@ -261,24 +264,56 @@ export default function ShareSettings() {
         </table>
       </div>
 
-      {/* SECTION 3: LOAN ELIGIBILITY */}
+      {/* SECTION 3: LOAN ELIGIBILITY + FEES */}
       <div style={sectionStyle}>
-        <h2 style={sectionHeader}>🏦 Loan Eligibility</h2>
-        <p style={{ color: '#64748b', fontSize: '13px' }}>These are shown to members when applying for a loan.</p>
+        <h2 style={sectionHeader}>🏦 Loan Eligibility & Fees</h2>
+        <p style={{ color: '#64748b', fontSize: '13px' }}>Eligibility is shown to members when applying for a loan.</p>
 
-        <div style={{ marginBottom: '20px' }}>
+        <div style={{ marginBottom: '16px' }}>
           <label style={labelStyle}>🚨 Emergency Loan Eligibility</label>
           <input type="text" value={settings.loanEligibility?.emergency || ''} onChange={e => updateEligibility('emergency', e.target.value)} style={input} placeholder="e.g., Must have 4 Golden shares" />
         </div>
 
-        <div style={{ marginBottom: '20px' }}>
+        <div style={{ marginBottom: '16px' }}>
           <label style={labelStyle}>🎓 School Fees Loan Eligibility</label>
           <input type="text" value={settings.loanEligibility?.school_fees || ''} onChange={e => updateEligibility('school_fees', e.target.value)} style={input} placeholder="e.g., Must have 1 Platinum share" />
         </div>
 
-        <div style={{ marginBottom: '20px' }}>
+        <div style={{ marginBottom: '16px' }}>
           <label style={labelStyle}>💼 Business Loan Eligibility</label>
           <input type="text" value={settings.loanEligibility?.business || ''} onChange={e => updateEligibility('business', e.target.value)} style={input} placeholder="e.g., Must have 1 Platinum + 1 Silver share" />
+        </div>
+
+        <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '16px', marginTop: '8px' }}>
+          <label style={labelStyle}>💵 Loan Processing Fee (%)</label>
+          <input
+            type="number"
+            min="0"
+            max="100"
+            step="0.1"
+            value={settings.loanProcessingFeePercent || 0}
+            onChange={e => updateProcessingFee(e.target.value)}
+            style={input}
+            placeholder="e.g., 2.5"
+          />
+          <p style={{ color: '#64748b', fontSize: '12px', marginTop: '6px' }}>
+            Deducted from the loan at disbursement. Goes to the Interest Fund.
+          </p>
+        </div>
+
+        <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '16px', marginTop: '16px' }}>
+          <label style={labelStyle}>📖 Constitution Fee (UGX)</label>
+          <input
+            type="number"
+            min="0"
+            value={settings.constitutionFee || 0}
+            onChange={e => updateConstitutionFee(e.target.value)}
+            style={input}
+            placeholder="e.g., 5000"
+          />
+          <p style={{ color: '#64748b', fontSize: '12px', marginTop: '6px' }}>
+            Amount a member pays to unlock the constitution download.
+          </p>
         </div>
       </div>
 
@@ -299,7 +334,7 @@ export default function ShareSettings() {
         </button>
       </div>
 
-      {/* ==================== SECTION 4: SHARE CERTIFICATES ==================== */}
+      {/* SECTION 4: SHARE CERTIFICATES */}
       <div style={{ ...sectionStyle, marginTop: '40px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <div>
@@ -309,12 +344,10 @@ export default function ShareSettings() {
           <button onClick={() => setShowIssueModal(true)} style={btn('#0ea5e9')}>➕ Issue Certificate</button>
         </div>
 
-        {/* Legend */}
         <div style={{ background: '#f8fafc', padding: '10px 14px', borderRadius: '8px', marginBottom: '12px', fontSize: '12px', color: '#475569' }}>
-          <strong>Actions:</strong> <span style={{ color: '#7c3aed', fontWeight: '600' }}>📄 PDF</span> — download certificate · <span style={{ color: '#f59e0b', fontWeight: '600' }}>⊘ Cancel</span> — mark invalid, keep record · <span style={{ color: '#991b1b', fontWeight: '600' }}>🗑 Delete</span> — permanent removal
+          <strong>Actions:</strong> <span style={{ color: '#7c3aed', fontWeight: '600' }}>📄 PDF</span> — download · <span style={{ color: '#f59e0b', fontWeight: '600' }}>⊘ Cancel</span> — mark invalid, keep record · <span style={{ color: '#991b1b', fontWeight: '600' }}>🗑 Delete</span> — permanent removal
         </div>
 
-        {/* Search */}
         <div style={{ marginBottom: '12px' }}>
           <input
             type="text"
@@ -330,7 +363,6 @@ export default function ShareSettings() {
           )}
         </div>
 
-        {/* Certificates table */}
         {filteredCerts.length === 0 ? (
           <p style={{ color: '#6b7280' }}>
             {certSearch ? `No certificates match "${certSearch}".` : 'No certificates issued yet.'}
@@ -373,19 +405,16 @@ export default function ShareSettings() {
                           href={`${API}/api/share-certificates/${c._id}/pdf`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          title="Download certificate PDF"
                           style={{ padding: '5px 10px', background: '#7c3aed', color: '#fff', borderRadius: '6px', textDecoration: 'none', fontSize: '11px', fontWeight: '600' }}
                         >📄 PDF</a>
                         {c.status === 'issued' && (
                           <button
                             onClick={() => cancelCertificate(c._id)}
-                            title="Mark as cancelled. Record is kept for audit."
                             style={{ padding: '5px 10px', background: '#f59e0b', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}
                           >⊘ Cancel</button>
                         )}
                         <button
                           onClick={() => deleteCertificate(c._id, c.certificateNumber)}
-                          title="PERMANENTLY delete from database. Cannot be undone."
                           style={{ padding: '5px 10px', background: '#991b1b', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}
                         >🗑 Delete</button>
                       </div>
@@ -434,7 +463,7 @@ export default function ShareSettings() {
             </div>
 
             <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', fontSize: '12px', color: '#475569', marginBottom: '16px' }}>
-              The certificate will snapshot the member's <strong>current</strong> shares. Any shares purchased later will require a new certificate.
+              The certificate will snapshot the member's <strong>current</strong> shares.
             </div>
 
             <div style={{ display: 'flex', gap: '10px' }}>

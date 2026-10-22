@@ -8,7 +8,7 @@ const SavingSchema = new mongoose.Schema({
   },
   category: {
     type: String,
-    enum: ['monthly', 'extra', 'misc', 'donation', 'penalty', 'business_profit', 'shares', 'membership'],
+    enum: ['monthly', 'extra', 'misc', 'donation', 'penalty', 'business_profit', 'shares', 'membership', 'constitution'],
     required: true
   },
   amount: { type: Number, required: true },
@@ -20,6 +20,13 @@ const SavingSchema = new mongoose.Schema({
   shareType: { type: String },
   shareQuantity: { type: Number, default: 0 },
   date: { type: Date, default: Date.now },
+
+  // NEW: how the money was received
+  paymentMethod: {
+    type: String,
+    enum: ['cash', 'bank', 'mobile_money'],
+    default: 'cash'
+  },
 
   reversed: { type: Boolean, default: false },
   reversedAt: { type: Date, default: null },

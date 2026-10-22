@@ -6,7 +6,7 @@ import { useNotification } from '../Notification';
 export function SettingsScreen() {
   const { showNotification } = useNotification();
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [apiBaseUrl, setApiBaseUrl] = useState('https://pesaflow-api-jpll.onrender.com');
+  const [apiBaseUrl, setApiBaseUrl] = useState('http://localhost:5000');
 
   useEffect(() => {
     // Load theme preference
@@ -101,7 +101,7 @@ export function SettingsScreen() {
                 value={apiBaseUrl}
                 onChange={(e) => setApiBaseUrl(e.target.value)}
                 className="form-input"
-                placeholder="https://pesaflow-api-jpll.onrender.com"
+                placeholder="http://localhost:5000"
               />
             </div>
             

@@ -5,19 +5,15 @@ const ClubExpenseSchema = new mongoose.Schema({
   amount: { type: Number, required: true, min: 0 },
   category: { type: String, default: 'other' },
 
-  // NEW: who was paid
+  // 'club' deducts from Club Capital (1000)
+  // 'loan' deducts from Loan Fund (1100) and counts against loan profit
+  scope: { type: String, enum: ['club', 'loan'], default: 'club', index: true },
+
   payee: { type: String, default: '' },
-
-  // NEW: who cashed out (staff who paid)
   cashier: { type: String, default: '' },
-
-  // NEW: attached vendor receipt image (base64 or file path)
   receiptImage: { type: String, default: '' },
 
-  // NEW: link to auto-generated payment voucher
   voucherId: { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentVoucher', default: null },
-
-  // NEW: for multi-entry grouping — same batchId = same submission
   batchId: { type: String, default: '' },
 
   date: { type: Date, required: true },

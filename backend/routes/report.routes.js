@@ -13,6 +13,7 @@ router.get('/journal-entries', reportController.getJournalEntries);
 router.get('/trial-balance/pdf', reportController.trialBalancePDF);
 router.get('/profit-loss/pdf', reportController.profitLossPDF);
 router.get('/balance-sheet/pdf', reportController.balanceSheetPDF);
+router.get('/journal-entries/pdf', reportController.journalEntriesPDF);
 router.get('/business/:id/transactions/pdf', reportController.businessTransactionsPDF);
 
 // ==================== DASHBOARD AGGREGATIONS ====================

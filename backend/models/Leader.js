@@ -20,6 +20,7 @@ const LeaderSchema = new mongoose.Schema({
     required: true
   },
   name: { type: String, required: true },
+  memberNumber: { type: String, default: '' },
   contact: { type: String, required: true },
   email: { type: String, default: '' },
   photo: { type: String, default: '' },

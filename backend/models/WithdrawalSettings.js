@@ -1,15 +1,24 @@
 const mongoose = require('mongoose');
 
 const WithdrawalSettingsSchema = new mongoose.Schema({
-  // June window
+  // First window (default: June)
   juneEnabled: { type: Boolean, default: true },
-  juneStartDay: { type: Number, default: 15, min: 1, max: 30 },
+  juneMonth: { type: Number, default: 6, min: 1, max: 12 },
+  juneStartDay: { type: Number, default: 15, min: 1, max: 31 },
   juneEndDay: { type: Number, default: 30, min: 1, max: 31 },
 
-  // December window
+  // Second window (default: December)
   decemberEnabled: { type: Boolean, default: true },
-  decemberStartDay: { type: Number, default: 15, min: 1, max: 30 },
+  decemberMonth: { type: Number, default: 12, min: 1, max: 12 },
+  decemberStartDay: { type: Number, default: 15, min: 1, max: 31 },
   decemberEndDay: { type: Number, default: 30, min: 1, max: 31 },
+
+  // ==================== DIVIDEND-SPECIFIC WINDOW ====================
+  dividendWindowEnabled: { type: Boolean, default: true },
+  dividendStartMonth: { type: Number, default: 12, min: 1, max: 12 },
+  dividendStartDay: { type: Number, default: 1, min: 1, max: 31 },
+  dividendEndMonth: { type: Number, default: 12, min: 1, max: 12 },
+  dividendEndDay: { type: Number, default: 31, min: 1, max: 31 },
 
   // Caps and rules
   savingsCapPercent: { type: Number, default: 20, min: 0, max: 100 },

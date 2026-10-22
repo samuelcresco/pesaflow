@@ -29,4 +29,6 @@ router.get('/interest-earned', loanController.getInterestEarned);
 router.get('/pending-count', loanController.getPendingCount);
 router.post('/apply-late-penalty/:loanId/:installmentNumber', loanController.applyLatePenalty);
 router.get('/overdue-count', loanController.getOverdueCount);
+// router.get('/schedules-report/pdf', loanController.allSchedulesPDF);
+router.get('/loan-expenses-total', loanController.getLoanExpensesTotal);
 module.exports = router;

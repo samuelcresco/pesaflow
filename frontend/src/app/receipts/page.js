@@ -1,15 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-
-import { apiFetch } from '../api-client';
-
-const API = 'https://pesaflow-api-jpll.onrender.com';
+import { apiFetch, API } from '../api-client';
+import PdfOptionsModal from '../../components/PdfOptionsModal';
 
 export default function ReceiptsPage() {
   const [receipts, setReceipts] = useState([]);
   const [summary, setSummary] = useState({ total: 0, totalAmount: 0 });
   const [loading, setLoading] = useState(true);
+  const [pdfModal, setPdfModal] = useState(null);
 
   // Filters
   const [search, setSearch] = useState('');
@@ -49,18 +48,14 @@ export default function ReceiptsPage() {
     }
   };
 
-  const openPDF = (id) => {
-    window.open(`${API}/api/receipts/${id}/pdf`, '_blank');
-  };
-
   const cancelReceipt = async (id) => {
     const reason = prompt('Reason for cancelling this receipt:');
     if (!reason) return;
     try {
-     const res = await apiFetch(`/api/receipts/${id}/cancel`, {
-  method: 'POST',
-  body: JSON.stringify({ reason, cancelledBy: 'admin' })
-});
+      const res = await apiFetch(`/api/receipts/${id}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ reason, cancelledBy: 'admin' })
+      });
       const d = await res.json();
       if (res.ok) {
         alert('Receipt cancelled');
@@ -161,7 +156,13 @@ export default function ReceiptsPage() {
                     }}>{r.status}</span>
                   </td>
                   <td style={td}>
-                    <button onClick={() => openPDF(r._id)} style={btnMini('#7c3aed')}>PDF</button>
+                    <button
+                      onClick={() => setPdfModal({
+                        title: `Receipt — ${r.receiptNumber}`,
+                        url: `${API}/api/receipts/${r._id}/pdf`
+                      })}
+                      style={btnMini('#7c3aed')}
+                    >PDF</button>
                     {r.status === 'issued' && (
                       <button onClick={() => cancelReceipt(r._id)} style={btnMini('#dc2626')}>Cancel</button>
                     )}
@@ -181,6 +182,14 @@ export default function ReceiptsPage() {
           fontWeight: '600', fontSize: '14px'
         }}>← Back to Dashboard</a>
       </div>
+
+      {pdfModal && (
+        <PdfOptionsModal
+          title={pdfModal.title}
+          baseUrl={pdfModal.url}
+          onClose={() => setPdfModal(null)}
+        />
+      )}
     </div>
   );
 }

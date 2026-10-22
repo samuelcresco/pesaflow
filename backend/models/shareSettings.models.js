@@ -27,6 +27,8 @@ const ShareSettingsSchema = new mongoose.Schema({
       business: 'Must have at least 1 Platinum AND 1 Silver share'
     }
   },
+  loanProcessingFeePercent: { type: Number, default: 0 },
+  constitutionFee: { type: Number, default: 0 },
   updatedBy: { type: String, default: '' },
   updatedAt: { type: Date, default: Date.now }
 });

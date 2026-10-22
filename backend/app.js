@@ -5,7 +5,6 @@ const morgan = require('morgan');
 const helmet = require('helmet');
 const mongoose = require('mongoose');
 
-// CHANGED 'MONGO_URI' to 'MONGODB_URI' to match your .env file
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/pesaflow')
   .then(() => console.log('✅ MongoDB Connected'))
   .catch(err => console.error('❌ MongoDB Error:', err.message));
@@ -24,8 +23,8 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Id', 'X-User-Role']
 }));
 app.use(morgan('dev'));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '20mb' }));
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
 // ==================== AUTHENTICATION ====================
 const { authenticate } = require('./middleware/rbac');
@@ -38,6 +37,8 @@ const adminRoutes = require('./routes/admin.routes');
 app.use('/api/admin', adminRoutes);
 const savingsRoutes = require('./routes/savings.routes');
 app.use('/api/savings', savingsRoutes);
+const bulkSavingRoutes = require('./routes/bulkSaving.routes');
+app.use('/api/bulk-savings', bulkSavingRoutes);
 const settingsRoutes = require('./routes/settings.routes');
 app.use('/api/settings', settingsRoutes);
 const loansRoutes = require('./routes/loans.routes');
@@ -50,6 +51,8 @@ const memberPortalRoutes = require('./routes/memberPortal.routes');
 app.use('/api/member', memberPortalRoutes);
 const leaderRoutes = require('./routes/leader.routes');
 app.use('/api/leaders', leaderRoutes);
+const letterRoutes = require('./routes/letter.routes');          // ← NEW
+app.use('/api/letters', letterRoutes);                           // ← NEW
 const investmentRoutes = require('./routes/investment.routes');
 app.use('/api/investments', investmentRoutes);
 const clubExpenseRoutes = require('./routes/clubExpense.routes');
@@ -70,6 +73,16 @@ const expensesRoutes = require('./routes/expenses.routes');
 app.use('/api/expenses', expensesRoutes);
 const deliveryNoteRoutes = require('./routes/deliveryNote.routes');
 app.use('/api/delivery-notes', deliveryNoteRoutes);
+const memberCardRoutes = require('./routes/memberCard.routes');
+app.use('/api', memberCardRoutes);
+const constitutionRoutes = require('./routes/constitution.routes');
+const savingRequestRoutes = require('./routes/savingRequest.routes');
+app.use('/api/saving-requests', savingRequestRoutes);
+const membershipRoutes = require('./routes/membership.routes');
+app.use('/api/membership', membershipRoutes);
+app.use('/api', constitutionRoutes);
+const shareRequestRoutes = require('./routes/shareRequest.routes');
+app.use('/api/share-requests', shareRequestRoutes);
 
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', message: 'PesaFlow backend running' });

@@ -4,6 +4,31 @@ import { useState } from 'react';
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
 
+// Remove paper background from a signature image (near-white → transparent)
+const cleanSignature = (dataUrl, threshold = 190) => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imgData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i], g = data[i + 1], b = data[i + 2];
+        if (r > threshold && g > threshold && b > threshold) {
+          data[i + 3] = 0;
+        }
+      }
+      ctx.putImageData(imgData, 0, 0);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.src = dataUrl;
+  });
+};
+
 export default function AddMember() {
   const router = useRouter();
   const [formData, setFormData] = useState({
@@ -17,6 +42,8 @@ export default function AddMember() {
     dateOfBirth: '',
     idNumber: '',
     photo: '',
+    signature: '',
+    cardQrMessage: '',
     ordinaryShares: 0,
     ordinaryAmount: 0,
     silverShares: 0,
@@ -29,6 +56,7 @@ export default function AddMember() {
     password: ''
   });
   const [photoPreview, setPhotoPreview] = useState('');
+  const [signaturePreview, setSignaturePreview] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -52,6 +80,20 @@ export default function AddMember() {
     reader.readAsDataURL(file);
   };
 
+  const handleSignature = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      setMessage('⏳ Cleaning signature…');
+      const cleaned = await cleanSignature(reader.result);
+      setSignaturePreview(cleaned);
+      setFormData({ ...formData, signature: cleaned });
+      setMessage('✅ Signature ready (background removed)');
+    };
+    reader.readAsDataURL(file);
+  };
+
   const generatePassword = () => {
     const letters = 'abcdefghijklmnopqrstuvwxyz';
     let pwd = '';
@@ -59,13 +101,6 @@ export default function AddMember() {
     setFormData({ ...formData, password: pwd });
   };
 
-  const copyPassword = () => {
-    if (!formData.password) return;
-    navigator.clipboard.writeText(formData.password);
-    alert('Password copied: ' + formData.password);
-  };
-
-  // ===== TOTALS =====
   const totalShares = 
     (parseInt(formData.ordinaryShares) || 0) +
     (parseInt(formData.silverShares) || 0) +
@@ -83,9 +118,14 @@ export default function AddMember() {
     setLoading(true);
     setMessage('');
 
-    // Validate total shares
     if (totalShares > 15) {
       setMessage('❌ Total shares cannot exceed 15');
+      setLoading(false);
+      return;
+    }
+
+    if (!formData.password || formData.password.length < 4) {
+      setMessage('❌ Click "Generate Password" first so the member has a password.');
       setLoading(false);
       return;
     }
@@ -100,6 +140,9 @@ export default function AddMember() {
       memberNumber: formData.memberNumber,
       dateOfBirth: formData.dateOfBirth,
       photo: formData.photo,
+      signature: formData.signature,
+      cardQrMessage: formData.cardQrMessage,
+      password: formData.password,
       shares: {
         golden: parseInt(formData.goldenShares) || 0,
         platinum: parseInt(formData.platinumShares) || 0,
@@ -116,9 +159,9 @@ export default function AddMember() {
     };
 
     try {
-      const res = await axios.post('https://pesaflow-api-jpll.onrender.com/api/members', payload);
+      const res = await axios.post('http://localhost:5000/api/members', payload);
       setMessage(`✅ Member created! Member No: ${formData.memberNumber} | Password: ${res.data.generatedPassword} — give this to the member.`);
-      setTimeout(() => router.push('/members'), 4000);
+      setTimeout(() => router.push('/members'), 5000);
     } catch (err) {
       const errMsg = err.response?.data?.error || err.message || 'Failed to create member';
       setMessage(`❌ ${errMsg}`);
@@ -134,12 +177,11 @@ export default function AddMember() {
       {message && (
         <div style={{
           padding: '12px', borderRadius: '8px', marginBottom: '20px',
-          background: message.startsWith('✅') ? '#dcfce7' : '#fee2e2',
-          color: message.startsWith('✅') ? '#065f46' : '#991b1b'
+          background: message.startsWith('✅') ? '#dcfce7' : message.startsWith('⏳') ? '#fef9e7' : '#fee2e2',
+          color: message.startsWith('✅') ? '#065f46' : message.startsWith('⏳') ? '#b45309' : '#991b1b'
         }}>{message}</div>
       )}
 
-      {/* PHOTO AT THE TOP */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '24px', padding: '16px', background: '#f8fafc', borderRadius: '12px' }}>
         {photoPreview ? (
           <img src={photoPreview} alt="Preview" style={{ width: '100px', height: '100px', borderRadius: '50%', objectFit: 'cover' }} />
@@ -150,6 +192,37 @@ export default function AddMember() {
           <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600' }}>Member Photo</label>
           <input type="file" accept="image/*" onChange={handlePhoto} />
         </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '24px', padding: '16px', background: '#f8fafc', borderRadius: '12px' }}>
+        {signaturePreview ? (
+          <img src={signaturePreview} alt="Signature" style={{ width: '160px', height: '70px', objectFit: 'contain', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px' }} />
+        ) : (
+          <div style={{ width: '160px', height: '70px', background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', color: '#64748b', borderRadius: '6px' }}>✍️</div>
+        )}
+        <div>
+          <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600' }}>Member Signature</label>
+          <input type="file" accept="image/*" onChange={handleSignature} />
+          <p style={{ margin: '6px 0 0 0', fontSize: '12px', color: '#64748b' }}>
+            Photo of the member's signature on white paper. Paper background is removed automatically.
+          </p>
+        </div>
+      </div>
+
+      {/* CARD QR MESSAGE */}
+      <div style={{ marginBottom: '24px', padding: '16px', background: '#f8fafc', borderRadius: '12px' }}>
+        <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600' }}>Card QR Message (optional)</label>
+        <textarea
+          name="cardQrMessage"
+          value={formData.cardQrMessage}
+          onChange={handleChange}
+          rows="2"
+          placeholder="e.g., Certified member. Owns 10 shares."
+          style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', resize: 'vertical', boxSizing: 'border-box' }}
+        />
+        <p style={{ margin: '6px 0 0 0', fontSize: '12px', color: '#64748b' }}>
+          This message appears on the verify page when the QR code on the card is scanned.
+        </p>
       </div>
 
       <form onSubmit={handleSubmit} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
@@ -181,7 +254,6 @@ export default function AddMember() {
           <input name="idNumber" value={formData.idNumber} onChange={handleChange} style={input} />
         </Field>
 
-        {/* SHARES */}
         <div style={{ gridColumn: 'span 2', borderTop: '2px solid #eee', paddingTop: '16px' }}>
           <h3>Shares</h3>
           <p style={{ color: '#64748b', fontSize: '13px' }}>Enter number of shares and amount per share. Total shares cannot exceed 15.</p>
@@ -212,7 +284,6 @@ export default function AddMember() {
             </div>
           </div>
 
-          {/* TOTALS */}
           <div style={{
             marginTop: '16px',
             padding: '14px 20px',
@@ -230,7 +301,6 @@ export default function AddMember() {
           </div>
         </div>
 
-        {/* NEXT OF KIN */}
         <div style={{ gridColumn: 'span 2', borderTop: '2px solid #eee', paddingTop: '16px' }}>
           <h3>Next of Kin</h3>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
@@ -244,56 +314,53 @@ export default function AddMember() {
           </div>
         </div>
 
-        {/* PASSWORD */}
-      <div style={{ gridColumn: 'span 2', borderTop: '2px solid #eee', paddingTop: '16px' }}>
-  <h3>Password</h3>
-  <p style={{ color: '#64748b', fontSize: '13px' }}>A password will be auto-generated. Member can change it after first login.</p>
-  <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-    <button type="button" onClick={generatePassword} style={btnSecondary}>Generate Password</button>
-    {formData.password && (
-      <>
-        <span style={{
-          padding: '10px 20px',
-          background: '#dcfce7',
-          color: '#065f46',
-          borderRadius: '8px',
-          fontWeight: '700',
-          fontSize: '20px',
-          letterSpacing: '4px',
-          fontFamily: 'monospace'
-        }}>
-          {formData.password}
-        </span>
-        <button
-          type="button"
-          onClick={() => {
-            navigator.clipboard.writeText(formData.password);
-            alert('Password copied: ' + formData.password);
-          }}
-          style={{
-            padding: '10px 16px',
-            background: '#2563eb',
-            color: '#fff',
-            border: 'none',
-            borderRadius: '8px',
-            cursor: 'pointer',
-            fontWeight: '600'
-          }}
-        >
-          📋 Copy
-        </button>
-      </>
-    )}
-  </div>
-  {formData.password && (
-    <p style={{ color: '#15803d', fontSize: '13px', marginTop: '8px' }}>
-      ✅ Give this password to the member. They will use it to log in and can change it later.
-    </p>
-  )}
-</div>
+        <div style={{ gridColumn: 'span 2', borderTop: '2px solid #eee', paddingTop: '16px' }}>
+          <h3>Password</h3>
+          <p style={{ color: '#64748b', fontSize: '13px' }}>Click Generate Password to create a 5-letter password. This exact password will be used by the member to log in.</p>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <button type="button" onClick={generatePassword} style={btnSecondary}>Generate Password</button>
+            {formData.password && (
+              <>
+                <span style={{
+                  padding: '10px 20px',
+                  background: '#dcfce7',
+                  color: '#065f46',
+                  borderRadius: '8px',
+                  fontWeight: '700',
+                  fontSize: '20px',
+                  letterSpacing: '4px',
+                  fontFamily: 'monospace'
+                }}>
+                  {formData.password}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(formData.password);
+                    alert('Password copied: ' + formData.password);
+                  }}
+                  style={{
+                    padding: '10px 16px',
+                    background: '#2563eb',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: '600'
+                  }}
+                >
+                  📋 Copy
+                </button>
+              </>
+            )}
+          </div>
+          {formData.password && (
+            <p style={{ color: '#15803d', fontSize: '13px', marginTop: '8px' }}>
+              ✅ Give this password to the member. They will use it to log in and can change it later.
+            </p>
+          )}
+        </div>
 
-
-        {/* SUBMIT */}
         <div style={{ gridColumn: 'span 2', display: 'flex', gap: '12px', marginTop: '16px' }}>
           <button type="submit" disabled={loading || totalShares > 15} style={{
             ...btnPrimary,

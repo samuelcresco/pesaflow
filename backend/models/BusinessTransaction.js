@@ -4,7 +4,7 @@ const BusinessTransactionSchema = new mongoose.Schema({
   businessId: { type: mongoose.Schema.Types.ObjectId, ref: 'Business', required: true },
   type: {
     type: String,
-    enum: ['capital_in', 'revenue', 'expense', 'loss', 'profit_extraction'],
+    enum: ['capital_in', 'capital_out', 'external_in', 'refund', 'sale', 'expense'],
     required: true
   },
   amount: { type: Number, required: true, min: 0 },

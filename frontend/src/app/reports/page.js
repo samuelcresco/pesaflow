@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { apiFetch, API } from '../api-client';
+import PdfOptionsModal from '../../components/PdfOptionsModal';
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
@@ -14,8 +15,10 @@ export default function ReportsPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [pdfModal, setPdfModal] = useState(null);
 
   useEffect(() => { fetchReport(tab); }, [tab]);
+  useEffect(() => { setPdfModal(null); }, [tab]);
 
   const fetchReport = async (type) => {
     setLoading(true);
@@ -47,6 +50,8 @@ export default function ReportsPage() {
       setLoading(false);
     }
   };
+
+  const openPdf = (title, url) => setPdfModal({ title, url });
 
   const tabs = [
     { id: 'overview', label: '📊 Overview' },
@@ -87,16 +92,24 @@ export default function ReportsPage() {
       {error && <div style={{ padding: '14px', background: '#fee2e2', color: '#991b1b', borderRadius: '8px' }}>❌ {error}</div>}
 
       {!loading && data && tab === 'overview' && <Overview data={data} />}
-      {!loading && data && tab === 'savings' && <Savings data={data} />}
-      {!loading && data && tab === 'loans' && <Loans data={data} />}
-      {!loading && data && tab === 'members' && <Members data={data} />}
-      {!loading && data && tab === 'shares' && <Shares data={data} />}
-      {!loading && data && tab === 'business' && <Business data={data} />}
-      {!loading && data && tab === 'expenses' && <Expenses data={data} />}
-      {!loading && data && tab === 'trial' && <TrialBalance data={data} />}
-      {!loading && data && tab === 'pl' && <ProfitLoss data={data} />}
-      {!loading && data && tab === 'bs' && <BalanceSheet data={data} />}
-      {!loading && data && tab === 'journal' && <JournalList data={data} />}
+      {!loading && data && tab === 'savings' && <Savings data={data} onOpenPdf={openPdf} />}
+      {!loading && data && tab === 'loans' && <Loans data={data} onOpenPdf={openPdf} />}
+      {!loading && data && tab === 'members' && <Members data={data} onOpenPdf={openPdf} />}
+      {!loading && data && tab === 'shares' && <Shares data={data} onOpenPdf={openPdf} />}
+      {!loading && data && tab === 'business' && <Business data={data} onOpenPdf={openPdf} />}
+      {!loading && data && tab === 'expenses' && <Expenses data={data} onOpenPdf={openPdf} />}
+      {!loading && data && tab === 'trial' && <TrialBalance data={data} onOpenPdf={openPdf} />}
+      {!loading && data && tab === 'pl' && <ProfitLoss data={data} onOpenPdf={openPdf} />}
+      {!loading && data && tab === 'bs' && <BalanceSheet data={data} onOpenPdf={openPdf} />}
+      {!loading && data && tab === 'journal' && <JournalList data={data} onOpenPdf={openPdf} />}
+
+      {pdfModal && (
+        <PdfOptionsModal
+          title={pdfModal.title}
+          baseUrl={pdfModal.url}
+          onClose={() => setPdfModal(null)}
+        />
+      )}
     </div>
   );
 }
@@ -268,7 +281,7 @@ function Overview({ data }) {
 }
 
 // ==================== SAVINGS ====================
-function Savings({ data }) {
+function Savings({ data, onOpenPdf }) {
   const cats = data.byCategory || [];
   const months = data.byMonth || [];
   const top = data.topMembers || [];
@@ -276,12 +289,10 @@ function Savings({ data }) {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
-        <a
-          href={`${API}/api/reports/dashboard/savings/pdf`}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', borderRadius: '8px', textDecoration: 'none', fontWeight: '600', fontSize: '13px' }}
-        >📄 Download Savings Report PDF</a>
+        <button
+          onClick={() => onOpenPdf('Savings Report', `${API}/api/reports/dashboard/savings/pdf`)}
+          style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
+        >📄 Download Savings Report PDF</button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
@@ -336,7 +347,7 @@ function Savings({ data }) {
 }
 
 // ==================== LOANS ====================
-function Loans({ data }) {
+function Loans({ data, onOpenPdf }) {
   const status = data.byStatus || [];
   const types = data.byType || [];
   const outstanding = data.outstandingLoans || [];
@@ -345,12 +356,10 @@ function Loans({ data }) {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
-        <a
-          href={`${API}/api/reports/dashboard/loans/pdf`}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', borderRadius: '8px', textDecoration: 'none', fontWeight: '600', fontSize: '13px' }}
-        >📄 Download Loans Report PDF</a>
+        <button
+          onClick={() => onOpenPdf('Loans Report', `${API}/api/reports/dashboard/loans/pdf`)}
+          style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
+        >📄 Download Loans Report PDF</button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '20px' }}>
@@ -442,7 +451,7 @@ function Loans({ data }) {
 }
 
 // ==================== MEMBERS ====================
-function Members({ data }) {
+function Members({ data, onOpenPdf }) {
   const growth = data.byMonth || [];
   const shares = data.shareBreakdown || {};
   const list = data.membersList || [];
@@ -457,12 +466,10 @@ function Members({ data }) {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
-        <a
-          href={`${API}/api/reports/dashboard/members/pdf`}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', borderRadius: '8px', textDecoration: 'none', fontWeight: '600', fontSize: '13px' }}
-        >📄 Download Members Report PDF</a>
+        <button
+          onClick={() => onOpenPdf('Members Report', `${API}/api/reports/dashboard/members/pdf`)}
+          style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
+        >📄 Download Members Report PDF</button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px', marginBottom: '20px' }}>
@@ -528,7 +535,7 @@ function Members({ data }) {
 }
 
 // ==================== SHARES ====================
-function Shares({ data }) {
+function Shares({ data, onOpenPdf }) {
   const totals = data.totals || {};
   const byMember = data.byMember || [];
 
@@ -542,12 +549,10 @@ function Shares({ data }) {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
-        <a
-          href={`${API}/api/reports/dashboard/shares/pdf`}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', borderRadius: '8px', textDecoration: 'none', fontWeight: '600', fontSize: '13px' }}
-        >📄 Download Shares Report PDF</a>
+        <button
+          onClick={() => onOpenPdf('Shares Report', `${API}/api/reports/dashboard/shares/pdf`)}
+          style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
+        >📄 Download Shares Report PDF</button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
@@ -619,18 +624,16 @@ function Shares({ data }) {
 }
 
 // ==================== BUSINESS ====================
-function Business({ data }) {
+function Business({ data, onOpenPdf }) {
   const list = data.byBusiness || [];
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
-        <a
-          href={`${API}/api/reports/dashboard/business/pdf`}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', borderRadius: '8px', textDecoration: 'none', fontWeight: '600', fontSize: '13px' }}
-        >📄 Download Business Report PDF</a>
+        <button
+          onClick={() => onOpenPdf('Business Report', `${API}/api/reports/dashboard/business/pdf`)}
+          style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
+        >📄 Download Business Report PDF</button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '20px' }}>
@@ -690,19 +693,17 @@ function Business({ data }) {
 }
 
 // ==================== EXPENSES ====================
-function Expenses({ data }) {
+function Expenses({ data, onOpenPdf }) {
   const club = data.club || {};
   const business = data.business || {};
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
-        <a
-          href={`${API}/api/reports/dashboard/expenses/pdf`}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', borderRadius: '8px', textDecoration: 'none', fontWeight: '600', fontSize: '13px' }}
-        >📄 Download Expenses Report PDF</a>
+        <button
+          onClick={() => onOpenPdf('Expenses Report', `${API}/api/reports/dashboard/expenses/pdf`)}
+          style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
+        >📄 Download Expenses Report PDF</button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
@@ -763,13 +764,20 @@ function Expenses({ data }) {
 }
 
 // ==================== TRIAL BALANCE ====================
-function TrialBalance({ data }) {
+function TrialBalance({ data, onOpenPdf }) {
   const accounts = data.accounts || [];
   const totalDebit = Number(data.totalDebit) || 0;
   const totalCredit = Number(data.totalCredit) || 0;
 
   return (
     <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
+        <button
+          onClick={() => onOpenPdf('Trial Balance', `${API}/api/reports/trial-balance/pdf`)}
+          style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
+        >📄 Download Trial Balance PDF</button>
+      </div>
+
       <p style={{ color: data.balanced ? '#15803d' : '#dc2626', fontWeight: '600' }}>
         {data.balanced ? '✅ Balanced' : '⚠️ NOT balanced'} — Debits: UGX {totalDebit.toLocaleString()} / Credits: UGX {totalCredit.toLocaleString()}
       </p>
@@ -798,12 +806,19 @@ function TrialBalance({ data }) {
 }
 
 // ==================== PROFIT & LOSS ====================
-function ProfitLoss({ data }) {
+function ProfitLoss({ data, onOpenPdf }) {
   const businesses = data.businesses || [];
   const totals = data.totals || {};
 
   return (
     <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
+        <button
+          onClick={() => onOpenPdf('Profit & Loss', `${API}/api/reports/profit-loss/pdf`)}
+          style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
+        >📄 Download P&L PDF</button>
+      </div>
+
       {businesses.length === 0 ? <EmptyMsg msg="No businesses yet." /> : (
         <table style={tableStyle}>
           <thead><tr style={theadStyle}><th style={th}>Business</th><th style={thRight}>Revenue</th><th style={thRight}>Expenses</th><th style={thRight}>Losses</th><th style={thRight}>Net Profit</th></tr></thead>
@@ -838,13 +853,20 @@ function ProfitLoss({ data }) {
 }
 
 // ==================== BALANCE SHEET ====================
-function BalanceSheet({ data }) {
+function BalanceSheet({ data, onOpenPdf }) {
   const assets = data.assets || [];
   const liabilities = data.liabilities || [];
   const equity = data.equity || [];
 
   return (
     <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
+        <button
+          onClick={() => onOpenPdf('Balance Sheet', `${API}/api/reports/balance-sheet/pdf`)}
+          style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
+        >📄 Download Balance Sheet PDF</button>
+      </div>
+
       <h3>Assets</h3>
       <table style={tableStyle}>
         <thead><tr style={theadStyle}><th style={th}>Code</th><th style={th}>Account</th><th style={thRight}>Balance</th></tr></thead>
@@ -901,12 +923,19 @@ function BalanceSheet({ data }) {
 }
 
 // ==================== JOURNAL ====================
-function JournalList({ data }) {
+function JournalList({ data, onOpenPdf }) {
   const entries = Array.isArray(data) ? data : [];
   if (entries.length === 0) return <EmptyMsg msg="No journal entries." />;
 
   return (
     <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
+        <button
+          onClick={() => onOpenPdf('Journal Entries', `${API}/api/reports/journal-entries/pdf`)}
+          style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
+        >📄 Download Journal PDF</button>
+      </div>
+
       {entries.map(entry => (
         <div key={entry._id} style={{ marginBottom: '20px', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>

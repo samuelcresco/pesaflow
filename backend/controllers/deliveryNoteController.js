@@ -139,11 +139,19 @@ exports.downloadDeliveryNotePDF = async (req, res) => {
     const note = await DeliveryNote.findById(req.params.id);
     if (!note) return res.status(404).json({ error: 'Delivery note not found' });
 
+    // Prevent browser caching so previews update instantly
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
     note.printedCount = (note.printedCount || 0) + 1;
     note.lastPrintedAt = new Date();
     await note.save();
 
-    await generateDeliveryNotePDF(note, res);
+    // Extract selected signatories from the query string
+    const requestedSigs = req.query.signatories ? req.query.signatories.split(',') : [];
+
+    await generateDeliveryNotePDF(note, res, requestedSigs);
   } catch (error) {
     console.error('DELIVERY NOTE PDF ERROR:', error.message);
     if (!res.headersSent) res.status(500).json({ error: error.message });

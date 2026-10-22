@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { apiFetch, API } from '../api-client';
+import PdfOptionsModal from '../../components/PdfOptionsModal';
 
 const CLUB_CATEGORIES = [
   'rent', 'utilities', 'transport', 'supplies', 'salaries',
@@ -11,6 +12,11 @@ const CLUB_CATEGORIES = [
 const BUSINESS_CATEGORIES = [
   'transport', 'fuel', 'supplies', 'rent', 'salaries',
   'utilities', 'maintenance', 'marketing', 'licensing', 'other'
+];
+
+const LOAN_CATEGORIES = [
+  'transport', 'fuel', 'licensing', 'salaries', 'office',
+  'marketing', 'legal', 'penalty', 'other'
 ];
 
 export default function ExpensesPage() {
@@ -24,6 +30,9 @@ export default function ExpensesPage() {
   const [selectedBusiness, setSelectedBusiness] = useState('');
   const [businessExpenses, setBusinessExpenses] = useState([]);
   const [businessTotals, setBusinessTotals] = useState({ byCategory: [], grandTotal: 0 });
+
+  const [loanExpenses, setLoanExpenses] = useState([]);
+  const [loanTotals, setLoanTotals] = useState({ byCategory: [], grandTotal: 0 });
 
   const [vouchers, setVouchers] = useState([]);
   const [voucherFilter, setVoucherFilter] = useState('all');
@@ -42,21 +51,33 @@ export default function ExpensesPage() {
   });
 
   const [msg, setMsg] = useState('');
+  const [pdfModal, setPdfModal] = useState(null);
 
-  useEffect(() => { fetchClubExpenses(); fetchBusinesses(); fetchVouchers(); }, []);
+  useEffect(() => { fetchClubExpenses(); fetchLoanExpenses(); fetchBusinesses(); fetchVouchers(); }, []);
   useEffect(() => { if (selectedBusiness) fetchBusinessExpenses(); }, [selectedBusiness]);
   useEffect(() => { fetchVouchers(); }, [voucherFilter]);
 
   const fetchClubExpenses = async () => {
     try {
       const [e, t] = await Promise.all([
-        apiFetch('/api/expenses').then(r => r.json()),
-        apiFetch('/api/expenses/category-totals').then(r => r.json())
+        apiFetch('/api/expenses?scope=club').then(r => r.json()),
+        apiFetch('/api/expenses/category-totals?scope=club').then(r => r.json())
       ]);
       setClubExpenses(e.expenses || []);
       setClubTotals(t);
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
+  };
+
+  const fetchLoanExpenses = async () => {
+    try {
+      const [e, t] = await Promise.all([
+        apiFetch('/api/expenses?scope=loan').then(r => r.json()),
+        apiFetch('/api/expenses/category-totals?scope=loan').then(r => r.json())
+      ]);
+      setLoanExpenses(e.expenses || []);
+      setLoanTotals(t);
+    } catch (err) { console.error(err); }
   };
 
   const fetchBusinesses = async () => {
@@ -103,6 +124,7 @@ export default function ExpensesPage() {
   const submitSingle = async (e) => {
     e.preventDefault();
     setMsg('');
+    const scope = tab === 'loan' ? 'loan' : 'club';
     try {
       if (tab === 'business') {
         const res = await apiFetch('/api/business/record-transaction', {
@@ -129,14 +151,15 @@ export default function ExpensesPage() {
       } else {
         const res = await apiFetch('/api/expenses', {
           method: 'POST',
-          body: JSON.stringify({ ...singleForm, amount: parseFloat(singleForm.amount) })
+          body: JSON.stringify({ ...singleForm, amount: parseFloat(singleForm.amount), scope })
         });
         const d = await res.json();
         if (res.ok) {
           setMsg(`✅ Recorded${d.voucher ? ` — voucher ${d.voucher.voucherNumber}` : ''}`);
           setShowSingle(false);
           resetSingleForm();
-          fetchClubExpenses();
+          if (scope === 'loan') fetchLoanExpenses();
+          else fetchClubExpenses();
           fetchVouchers();
         } else setMsg('❌ ' + (d.error || 'Failed'));
       }
@@ -147,6 +170,8 @@ export default function ExpensesPage() {
     setMsg('');
     const valid = multiItems.filter(i => i.description && Number(i.amount) > 0);
     if (valid.length === 0) return setMsg('❌ Add at least one item with description and amount');
+
+    const scope = tab === 'loan' ? 'loan' : 'club';
 
     try {
       if (tab === 'business') {
@@ -180,7 +205,8 @@ export default function ExpensesPage() {
             cashier: multiMeta.cashier,
             date: multiMeta.date,
             notes: multiMeta.notes,
-            receiptImage: multiMeta.receiptImage
+            receiptImage: multiMeta.receiptImage,
+            scope
           })
         });
         const d = await res.json();
@@ -188,7 +214,8 @@ export default function ExpensesPage() {
           setMsg(`✅ ${d.message || 'Recorded'}${d.voucher ? ` — voucher ${d.voucher.voucherNumber}` : ''}`);
           setShowMulti(false);
           resetMultiForm();
-          fetchClubExpenses();
+          if (scope === 'loan') fetchLoanExpenses();
+          else fetchClubExpenses();
           fetchVouchers();
         } else setMsg('❌ ' + (d.error || 'Failed'));
       }
@@ -205,8 +232,9 @@ export default function ExpensesPage() {
     setMultiMeta({ payee: '', cashier: '', date: new Date().toISOString().split('T')[0], notes: '', receiptImage: '' });
   };
 
-  const deleteExpense = async (id, description, amount) => {
-    if (!confirm(`⚠️ DELETE expense "${description}" (UGX ${Number(amount).toLocaleString()})?\n\nThis will reverse the journal and restore Club Capital.`)) return;
+  const deleteExpense = async (id, description, amount, scope) => {
+    const label = scope === 'loan' ? 'Loan' : 'Club';
+    if (!confirm(`⚠️ DELETE ${label} expense "${description}" (UGX ${Number(amount).toLocaleString()})?\n\nThis will reverse the journal and restore the ${scope === 'loan' ? 'Loan Fund' : 'Club Capital'}.`)) return;
     const reason = prompt('Reason for deletion:');
     if (!reason) return;
     try {
@@ -217,7 +245,8 @@ export default function ExpensesPage() {
       const d = await res.json();
       if (res.ok) {
         alert('✅ ' + d.message);
-        fetchClubExpenses();
+        if (scope === 'loan') fetchLoanExpenses();
+        else fetchClubExpenses();
         fetchVouchers();
       } else alert('❌ ' + (d.error || 'Failed'));
     } catch (err) { alert('Network error'); }
@@ -260,17 +289,22 @@ export default function ExpensesPage() {
 
   if (loading) return <div style={{ padding: '40px' }}>Loading...</div>;
 
-  const categories = tab === 'business' ? BUSINESS_CATEGORIES : CLUB_CATEGORIES;
-  const currentTotals = tab === 'business' ? businessTotals : clubTotals;
-  const currentExpenses = tab === 'business' ? businessExpenses : clubExpenses;
+  const categories =
+    tab === 'business' ? BUSINESS_CATEGORIES :
+    tab === 'loan' ? LOAN_CATEGORIES :
+    CLUB_CATEGORIES;
+
+  const currentTotals = tab === 'business' ? businessTotals : tab === 'loan' ? loanTotals : clubTotals;
+  const currentExpenses = tab === 'business' ? businessExpenses : tab === 'loan' ? loanExpenses : clubExpenses;
 
   return (
     <div style={{ padding: '24px', maxWidth: '1400px', margin: '0 auto', fontFamily: 'Segoe UI, sans-serif' }}>
       <h1 style={{ color: '#1e293b' }}>💸 Expenses</h1>
 
-      <div style={{ display: 'flex', gap: '4px', borderBottom: '2px solid #e5e7eb', marginBottom: '20px' }}>
+      <div style={{ display: 'flex', gap: '4px', borderBottom: '2px solid #e5e7eb', marginBottom: '20px', flexWrap: 'wrap' }}>
         <TabBtn active={tab === 'club'} onClick={() => setTab('club')}>🏛️ Club Expenses</TabBtn>
-        <TabBtn active={tab === 'business'} onClick={() => setTab('business')}>💼 Business Expenses</TabBtn>
+        <TabBtn active={tab === 'loan'} onClick={() => setTab('loan')}>💼 Loan Expenses</TabBtn>
+        <TabBtn active={tab === 'business'} onClick={() => setTab('business')}>🏢 Business Expenses</TabBtn>
         <TabBtn active={tab === 'vouchers'} onClick={() => setTab('vouchers')}>🧾 Vouchers</TabBtn>
       </div>
 
@@ -283,7 +317,7 @@ export default function ExpensesPage() {
         </div>
       )}
 
-      {(tab === 'club' || tab === 'business') && (
+      {(tab === 'club' || tab === 'loan' || tab === 'business') && (
         <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
           <button onClick={() => { setShowSingle(true); setMsg(''); }} style={btn('#2563eb')}>➕ Add Expense</button>
           <button onClick={() => { setShowMulti(true); setMsg(''); }} style={btn('#7c3aed')}>➕ Add Multiple</button>
@@ -292,7 +326,7 @@ export default function ExpensesPage() {
 
       {msg && <div style={{ padding: '12px', borderRadius: '8px', marginBottom: '16px', background: msg.startsWith('✅') ? '#dcfce7' : '#fee2e2', color: msg.startsWith('✅') ? '#065f46' : '#991b1b', fontWeight: '600' }}>{msg}</div>}
 
-      {(tab === 'club' || tab === 'business') && (
+      {(tab === 'club' || tab === 'loan' || tab === 'business') && (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
             <SummaryCard title="Total Spent" value={currentTotals.grandTotal || 0} color="#dc2626" bg="#fee2e2" icon="💸" />
@@ -342,7 +376,7 @@ export default function ExpensesPage() {
                       <td style={td}>
                         <div style={{ display: 'flex', gap: '4px', whiteSpace: 'nowrap' }}>
                           {e.receiptImage ? <a href={e.receiptImage} target="_blank" rel="noopener noreferrer" style={{ padding: '5px 10px', background: '#0891b2', color: '#fff', borderRadius: '6px', textDecoration: 'none', fontSize: '11px' }}>📎</a> : null}
-                          {tab === 'club' && <button onClick={() => deleteExpense(e._id, e.description, e.amount)} style={{ padding: '5px 10px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>🗑 Delete</button>}
+                          {tab !== 'business' && <button onClick={() => deleteExpense(e._id, e.description, e.amount, e.scope)} style={{ padding: '5px 10px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>🗑 Delete</button>}
                         </div>
                       </td>
                     </tr>
@@ -360,6 +394,7 @@ export default function ExpensesPage() {
             <select value={voucherFilter} onChange={e => setVoucherFilter(e.target.value)} style={input}>
               <option value="all">All Vouchers</option>
               <option value="club">Club Vouchers</option>
+              <option value="loan">Loan Vouchers</option>
               <option value="business">Business Vouchers</option>
             </select>
           </div>
@@ -390,7 +425,7 @@ export default function ExpensesPage() {
                       </td>
                       <td style={td}>
                         <div style={{ display: 'flex', gap: '4px', whiteSpace: 'nowrap' }}>
-                          <a href={`${API}/api/expenses/vouchers/${v._id}/pdf`} target="_blank" rel="noopener noreferrer" style={{ padding: '5px 10px', background: '#7c3aed', color: '#fff', borderRadius: '6px', textDecoration: 'none', fontSize: '11px' }}>📄</a>
+                          <button onClick={() => setPdfModal({ title: 'Payment Voucher', url: `${API}/api/expenses/vouchers/${v._id}/pdf` })} style={{ padding: '5px 10px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>📄 PDF</button>
                           <button onClick={() => deleteVoucher(v._id, v.voucherNumber)} style={{ padding: '5px 10px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>🗑 Delete</button>
                         </div>
                       </td>
@@ -404,7 +439,7 @@ export default function ExpensesPage() {
       )}
 
       {showSingle && (
-        <Modal onClose={() => setShowSingle(false)} title={`Add ${tab === 'business' ? 'Business' : 'Club'} Expense`}>
+        <Modal onClose={() => setShowSingle(false)} title={`Add ${tab === 'business' ? 'Business' : tab === 'loan' ? 'Loan' : 'Club'} Expense`}>
           <form onSubmit={submitSingle}>
             <Field label="Description *"><input type="text" value={singleForm.description} onChange={e => setSingleForm({ ...singleForm, description: e.target.value })} required style={input} placeholder="e.g., Water bill for September" /></Field>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
@@ -433,7 +468,7 @@ export default function ExpensesPage() {
       )}
 
       {showMulti && (
-        <Modal onClose={() => setShowMulti(false)} title={`Add Multiple ${tab === 'business' ? 'Business' : 'Club'} Expenses`} wide>
+        <Modal onClose={() => setShowMulti(false)} title={`Add Multiple ${tab === 'business' ? 'Business' : tab === 'loan' ? 'Loan' : 'Club'} Expenses`} wide>
           <div style={{ marginBottom: '16px' }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
               <Field label="Payee"><input type="text" value={multiMeta.payee} onChange={e => setMultiMeta({ ...multiMeta, payee: e.target.value })} style={input} /></Field>
@@ -468,6 +503,14 @@ export default function ExpensesPage() {
             <button type="button" onClick={() => setShowMulti(false)} style={btn('#6b7280')}>Cancel</button>
           </div>
         </Modal>
+      )}
+
+      {pdfModal && (
+        <PdfOptionsModal
+          title={pdfModal.title}
+          baseUrl={pdfModal.url}
+          onClose={() => setPdfModal(null)}
+        />
       )}
     </div>
   );

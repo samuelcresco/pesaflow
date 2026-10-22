@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-
+import PdfOptionsModal from '../../components/PdfOptionsModal';
 import { apiFetch } from '../api-client';
 
-const API = 'https://pesaflow-api-jpll.onrender.com';
+const API = 'http://localhost:5000';
 
 export default function StatementsPage() {
   const [members, setMembers] = useState([]);
@@ -18,6 +18,7 @@ export default function StatementsPage() {
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
+  const [pdfModal, setPdfModal] = useState(null);
 
   useEffect(() => { fetchMembers(); }, []);
 
@@ -51,7 +52,10 @@ export default function StatementsPage() {
 
   const openPDF = () => {
     if (!selectedMember) return alert('Select a member first');
-    window.open(`${API}/api/members/${selectedMember}/statement/pdf?from=${from}&to=${to}`, '_blank');
+    setPdfModal({
+      title: 'Member Statement',
+      url: `${API}/api/members/${selectedMember}/statement/pdf`
+    });
   };
 
   if (loading) return <div style={{ padding: '40px' }}>Loading...</div>;
@@ -101,7 +105,7 @@ export default function StatementsPage() {
       {selectedMember && (
         <div style={{ marginBottom: '20px' }}>
           <button onClick={openPDF} style={{ padding: '12px 24px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', fontSize: '15px' }}>
-            📄 Download PDF Statement
+            📄 Generate PDF Statement
           </button>
         </div>
       )}
@@ -169,6 +173,11 @@ export default function StatementsPage() {
             </div>
           )}
         </div>
+      )}
+
+      {/* PDF OPTIONS MODAL */}
+      {pdfModal && (
+        <PdfOptionsModal title={pdfModal.title} baseUrl={pdfModal.url} onClose={() => setPdfModal(null)} />
       )}
 
       {/* Back to Dashboard */}

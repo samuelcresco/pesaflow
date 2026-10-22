@@ -1,14 +1,33 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-
 import { apiFetch } from '../api-client';
 
-const API = 'https://pesaflow-api-jpll.onrender.com';
+const API = 'http://localhost:5000';
+
+const MONTHS = [
+  { value: 1, label: 'January' },
+  { value: 2, label: 'February' },
+  { value: 3, label: 'March' },
+  { value: 4, label: 'April' },
+  { value: 5, label: 'May' },
+  { value: 6, label: 'June' },
+  { value: 7, label: 'July' },
+  { value: 8, label: 'August' },
+  { value: 9, label: 'September' },
+  { value: 10, label: 'October' },
+  { value: 11, label: 'November' },
+  { value: 12, label: 'December' }
+];
 
 export default function WithdrawalsPage() {
   const [withdrawals, setWithdrawals] = useState([]);
-  const [summary, setSummary] = useState({ window: { ok: false, period: null }, counts: { pending: 0, approved: 0, paid: 0, rejected: 0 }, totalPaid: 0, windowLabel: '' });
+  const [summary, setSummary] = useState({
+    window: { ok: false, period: null },
+    counts: { pending: 0, approved: 0, paid: 0, rejected: 0 },
+    totalPaid: 0,
+    windowLabel: ''
+  });
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
@@ -19,7 +38,6 @@ export default function WithdrawalsPage() {
   const [settings, setSettings] = useState(null);
   const [savingSettings, setSavingSettings] = useState(false);
 
-  // Request form
   const [requestForm, setRequestForm] = useState({
     memberId: '',
     source: 'savings',
@@ -29,7 +47,6 @@ export default function WithdrawalsPage() {
   });
   const [eligibility, setEligibility] = useState(null);
 
-  // Payment form
   const [paymentForm, setPaymentForm] = useState({
     paymentMethod: 'cash',
     paymentReference: '',
@@ -41,18 +58,26 @@ export default function WithdrawalsPage() {
 
   const fetchAll = async () => {
     try {
-      const [w, s, mem, st] = await Promise.all([
-        apiFetch('/api/withdrawals').then(r => r.json()),
+      const [wRes, sRes, mRes, stRes] = await Promise.all([
         apiFetch('/api/withdrawals').then(r => r.json()),
         apiFetch('/api/withdrawals/summary').then(r => r.json()),
-        apiFetch('/api/members').then(r => r.json())
+        apiFetch('/api/members').then(r => r.json()),
+        apiFetch('/api/withdrawals/settings').then(r => r.json()).catch(() => null)
       ]);
-      setWithdrawals(w.withdrawals || []);
-      setSummary(s);
-      setMembers(Array.isArray(mem) ? mem : []);
-      setSettings(st);
-    } catch (err) { console.error(err); }
-    finally { setLoading(false); }
+      setWithdrawals(wRes.withdrawals || []);
+      setSummary(sRes || {
+        window: { ok: false, period: null },
+        counts: { pending: 0, approved: 0, paid: 0, rejected: 0 },
+        totalPaid: 0,
+        windowLabel: ''
+      });
+      setMembers(Array.isArray(mRes) ? mRes : []);
+      setSettings(stRes);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const fetchWithdrawals = async () => {
@@ -63,7 +88,9 @@ export default function WithdrawalsPage() {
       const res = await apiFetch(`/api/withdrawals?${params.toString()}`);
       const data = await res.json();
       setWithdrawals(data.withdrawals || []);
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const checkEligibility = async (memberId, source) => {
@@ -72,7 +99,9 @@ export default function WithdrawalsPage() {
       const res = await apiFetch(`/api/withdrawals/eligibility/${memberId}?source=${source}&amount=0`);
       const data = await res.json();
       setEligibility(data);
-    } catch (err) { setEligibility(null); }
+    } catch (err) {
+      setEligibility(null);
+    }
   };
 
   useEffect(() => {
@@ -82,10 +111,10 @@ export default function WithdrawalsPage() {
   const submitRequest = async (e) => {
     e.preventDefault();
     try {
-     const res = await apiFetch('/api/withdrawals', {
-      method: 'POST',
-      body: JSON.stringify({ ...requestForm, requestedBy: 'admin' })
-    });
+      const res = await apiFetch('/api/withdrawals', {
+        method: 'POST',
+        body: JSON.stringify({ ...requestForm, requestedBy: 'admin' })
+      });
       const d = await res.json();
       if (res.ok) {
         alert('✅ ' + d.message);
@@ -93,8 +122,12 @@ export default function WithdrawalsPage() {
         setRequestForm({ memberId: '', source: 'savings', amount: '', notes: '', overrideReason: '' });
         setEligibility(null);
         fetchAll();
-      } else alert('❌ ' + d.error);
-    } catch (err) { alert('Network error'); }
+      } else {
+        alert('❌ ' + d.error);
+      }
+    } catch (err) {
+      alert('Network error');
+    }
   };
 
   const approve = async (id) => {
@@ -107,7 +140,9 @@ export default function WithdrawalsPage() {
       const d = await res.json();
       if (res.ok) { alert('✅ Approved'); fetchAll(); }
       else alert('❌ ' + d.error);
-    } catch (err) { alert('Network error'); }
+    } catch (err) {
+      alert('Network error');
+    }
   };
 
   const reject = async (id) => {
@@ -121,7 +156,9 @@ export default function WithdrawalsPage() {
       const d = await res.json();
       if (res.ok) { alert('✅ Rejected'); fetchAll(); }
       else alert('❌ ' + d.error);
-    } catch (err) { alert('Network error'); }
+    } catch (err) {
+      alert('Network error');
+    }
   };
 
   const submitPayment = async (e) => {
@@ -137,8 +174,12 @@ export default function WithdrawalsPage() {
         setShowPayModal(null);
         setPaymentForm({ paymentMethod: 'cash', paymentReference: '', paidBy: 'admin' });
         fetchAll();
-      } else alert('❌ ' + d.error);
-    } catch (err) { alert('Network error'); }
+      } else {
+        alert('❌ ' + d.error);
+      }
+    } catch (err) {
+      alert('Network error');
+    }
   };
 
   const saveSettings = async (e) => {
@@ -155,14 +196,20 @@ export default function WithdrawalsPage() {
         alert('✅ Settings saved');
         setShowSettings(false);
         fetchAll();
-      } else alert('❌ ' + d.error);
-    } catch (err) { alert('Network error'); }
-    finally { setSavingSettings(false); }
+      } else {
+        alert('❌ ' + d.error);
+      }
+    } catch (err) {
+      alert('Network error');
+    } finally {
+      setSavingSettings(false);
+    }
   };
 
   if (loading) return <div style={{ padding: '40px' }}>Loading...</div>;
 
-  const { window, counts } = summary;
+  const win = summary?.window || { ok: false, period: null };
+  const counts = summary?.counts || { pending: 0, approved: 0, paid: 0, rejected: 0 };
 
   return (
     <div style={{ padding: '24px', maxWidth: '1400px', margin: '0 auto', fontFamily: 'Segoe UI, sans-serif' }}>
@@ -174,28 +221,28 @@ export default function WithdrawalsPage() {
         </div>
       </div>
 
-      {/* Window Status */}
       <div style={{
-        background: window.ok ? '#dcfce7' : '#fef9e7',
-        border: `1px solid ${window.ok ? '#86efac' : '#fcd34d'}`,
-        padding: '14px 20px', borderRadius: '10px', marginBottom: '20px',
-        color: window.ok ? '#065f46' : '#b45309', fontWeight: '600'
+        background: win.ok ? '#dcfce7' : '#fef9e7',
+        border: `1px solid ${win.ok ? '#86efac' : '#fcd34d'}`,
+        padding: '14px 20px',
+        borderRadius: '10px',
+        marginBottom: '20px',
+        color: win.ok ? '#065f46' : '#b45309',
+        fontWeight: '600'
       }}>
-        {window.ok
-          ? `✅ Withdrawal window OPEN — Period: ${window.period}`
-          : `⏳ Withdrawal window CLOSED — Opens ${summary.windowLabel || 'June 15–30 and December 15–30'}`}
+        {win.ok
+          ? `✅ Withdrawal window OPEN — Period: ${win.period}`
+          : `⏳ Withdrawal window CLOSED — Opens ${summary?.windowLabel || 'June 15–30 and December 15–30'}`}
       </div>
 
-      {/* Summary Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px', marginBottom: '20px' }}>
         <Card title="Pending" value={counts.pending} color="#b45309" bg="#fef9e7" raw />
         <Card title="Approved" value={counts.approved} color="#0369a1" bg="#e0f2fe" raw />
         <Card title="Paid" value={counts.paid} color="#15803d" bg="#dcfce7" raw />
         <Card title="Rejected" value={counts.rejected} color="#dc2626" bg="#fee2e2" raw />
-        <Card title="Total Paid Out" value={summary.totalPaid} color="#7c3aed" bg="#f3e8ff" />
+        <Card title="Total Paid Out" value={summary?.totalPaid || 0} color="#7c3aed" bg="#f3e8ff" />
       </div>
 
-      {/* Filters */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={input}>
           <option value="">All Statuses</option>
@@ -212,7 +259,6 @@ export default function WithdrawalsPage() {
         </select>
       </div>
 
-      {/* Table */}
       {withdrawals.length === 0 ? (
         <p style={{ color: '#6b7280' }}>No withdrawals found.</p>
       ) : (
@@ -243,11 +289,15 @@ export default function WithdrawalsPage() {
                     {w.period}
                     {w.period === 'override' && <span style={{ marginLeft: '4px', color: '#dc2626', fontSize: '11px', fontWeight: '700' }}>⚠️</span>}
                   </td>
-                  <td style={{ ...td, fontWeight: '700' }}>UGX {w.amount.toLocaleString()}</td>
+                  <td style={{ ...td, fontWeight: '700' }}>UGX {(w.amount || 0).toLocaleString()}</td>
                   <td style={td}>
                     <span style={{
-                      padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: '600',
-                      background: statusBg(w.status), color: statusColor(w.status)
+                      padding: '3px 8px',
+                      borderRadius: '12px',
+                      fontSize: '11px',
+                      fontWeight: '600',
+                      background: statusBg(w.status),
+                      color: statusColor(w.status)
                     }}>{w.status}</span>
                   </td>
                   <td style={td}>
@@ -278,7 +328,6 @@ export default function WithdrawalsPage() {
         </div>
       )}
 
-      {/* ==================== REQUEST MODAL ==================== */}
       {showRequest && (
         <Modal onClose={() => { setShowRequest(false); setEligibility(null); }} title="New Withdrawal Request">
           <form onSubmit={submitRequest}>
@@ -300,11 +349,11 @@ export default function WithdrawalsPage() {
 
             {eligibility && (
               <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '14px', fontSize: '13px' }}>
-                <div><strong>Savings:</strong> UGX {eligibility.savings.toLocaleString()}</div>
-                <div><strong>Dividends:</strong> UGX {eligibility.dividendBalance.toLocaleString()}</div>
-                <div><strong>Max from savings:</strong> UGX {Math.floor(eligibility.savings * ((eligibility.savingsCapPercent || 20) / 100)).toLocaleString()}</div>
+                <div><strong>Savings:</strong> UGX {(eligibility.savings || 0).toLocaleString()}</div>
+                <div><strong>Dividends:</strong> UGX {(eligibility.dividendBalance || 0).toLocaleString()}</div>
+                <div><strong>Max from savings:</strong> UGX {Math.floor((eligibility.savings || 0) * ((eligibility.savingsCapPercent || 20) / 100)).toLocaleString()}</div>
                 {eligibility.hasActiveLoan && <div style={{ color: '#dc2626', fontWeight: '600' }}>⚠️ Member has an active loan — withdrawals blocked</div>}
-                {!eligibility.window.ok && (
+                {eligibility.window && !eligibility.window.ok && (
                   <div style={{ color: '#b45309', fontWeight: '600', marginTop: '6px' }}>
                     ⚠️ Outside withdrawal window ({eligibility.windowLabel})
                   </div>
@@ -320,7 +369,7 @@ export default function WithdrawalsPage() {
               <input type="text" value={requestForm.notes} onChange={e => setRequestForm({ ...requestForm, notes: e.target.value })} style={inputFull} />
             </Field>
 
-            {eligibility && !eligibility.window.ok && (
+            {eligibility && eligibility.window && !eligibility.window.ok && (
               <Field label="⚠️ Override Reason (required to proceed outside window)">
                 <input type="text" value={requestForm.overrideReason} onChange={e => setRequestForm({ ...requestForm, overrideReason: e.target.value })} style={inputFull} placeholder="e.g., Medical emergency approved by chairman" />
               </Field>
@@ -334,7 +383,6 @@ export default function WithdrawalsPage() {
         </Modal>
       )}
 
-      {/* ==================== PAYMENT MODAL ==================== */}
       {showPayModal && (
         <Modal onClose={() => setShowPayModal(null)} title="Record Payment">
           <form onSubmit={submitPayment}>
@@ -367,39 +415,48 @@ export default function WithdrawalsPage() {
         </Modal>
       )}
 
-      {/* ==================== SETTINGS MODAL ==================== */}
       {showSettings && settings && (
         <Modal onClose={() => setShowSettings(false)} title="⚙️ Withdrawal Settings">
           <form onSubmit={saveSettings}>
-            <SectionTitle>June Window</SectionTitle>
+            <SectionTitle>Window 1</SectionTitle>
             <Field label="Enabled">
               <select value={settings.juneEnabled ? 'yes' : 'no'} onChange={e => setSettings({ ...settings, juneEnabled: e.target.value === 'yes' })} style={inputFull}>
                 <option value="yes">Yes</option>
                 <option value="no">No</option>
               </select>
             </Field>
+            <Field label="Month">
+              <select value={settings.juneMonth || 6} onChange={e => setSettings({ ...settings, juneMonth: parseInt(e.target.value) })} style={inputFull}>
+                {MONTHS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+            </Field>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-              <Field label="Start Day (1–30)">
-                <input type="number" min="1" max="30" value={settings.juneStartDay} onChange={e => setSettings({ ...settings, juneStartDay: parseInt(e.target.value) || 1 })} style={inputFull} />
+              <Field label="Start Day (1–31)">
+                <input type="number" min="1" max="31" value={settings.juneStartDay} onChange={e => setSettings({ ...settings, juneStartDay: parseInt(e.target.value) || 1 })} style={inputFull} />
               </Field>
-              <Field label="End Day (1–30)">
-                <input type="number" min="1" max="30" value={settings.juneEndDay} onChange={e => setSettings({ ...settings, juneEndDay: parseInt(e.target.value) || 30 })} style={inputFull} />
+              <Field label="End Day (1–31)">
+                <input type="number" min="1" max="31" value={settings.juneEndDay} onChange={e => setSettings({ ...settings, juneEndDay: parseInt(e.target.value) || 30 })} style={inputFull} />
               </Field>
             </div>
 
-            <SectionTitle>December Window</SectionTitle>
+            <SectionTitle>Window 2</SectionTitle>
             <Field label="Enabled">
               <select value={settings.decemberEnabled ? 'yes' : 'no'} onChange={e => setSettings({ ...settings, decemberEnabled: e.target.value === 'yes' })} style={inputFull}>
                 <option value="yes">Yes</option>
                 <option value="no">No</option>
               </select>
             </Field>
+            <Field label="Month">
+              <select value={settings.decemberMonth || 12} onChange={e => setSettings({ ...settings, decemberMonth: parseInt(e.target.value) })} style={inputFull}>
+                {MONTHS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+            </Field>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-              <Field label="Start Day (1–30)">
-                <input type="number" min="1" max="30" value={settings.decemberStartDay} onChange={e => setSettings({ ...settings, decemberStartDay: parseInt(e.target.value) || 1 })} style={inputFull} />
+              <Field label="Start Day (1–31)">
+                <input type="number" min="1" max="31" value={settings.decemberStartDay} onChange={e => setSettings({ ...settings, decemberStartDay: parseInt(e.target.value) || 1 })} style={inputFull} />
               </Field>
-              <Field label="End Day (1–30)">
-                <input type="number" min="1" max="30" value={settings.decemberEndDay} onChange={e => setSettings({ ...settings, decemberEndDay: parseInt(e.target.value) || 30 })} style={inputFull} />
+              <Field label="End Day (1–31)">
+                <input type="number" min="1" max="31" value={settings.decemberEndDay} onChange={e => setSettings({ ...settings, decemberEndDay: parseInt(e.target.value) || 30 })} style={inputFull} />
               </Field>
             </div>
 
@@ -437,7 +494,6 @@ export default function WithdrawalsPage() {
   );
 }
 
-// ==================== HELPERS ====================
 const statusBg = (s) => ({ pending: '#fef9e7', approved: '#e0f2fe', paid: '#dcfce7', rejected: '#fee2e2', cancelled: '#f1f5f9' }[s] || '#f1f5f9');
 const statusColor = (s) => ({ pending: '#b45309', approved: '#0369a1', paid: '#15803d', rejected: '#dc2626', cancelled: '#64748b' }[s] || '#64748b');
 

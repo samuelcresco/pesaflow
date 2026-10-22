@@ -1,0 +1,394 @@
+'use client';
+
+import { useState, useRef, useEffect } from 'react';
+import { apiFetch } from '../../api-client';
+
+export default function SplitSignatures() {
+  const [members, setMembers] = useState([]);
+  const [imageSrc, setImageSrc] = useState('');
+  const [crops, setCrops] = useState([]);
+  const [drawing, setDrawing] = useState(null);
+  const [dragging, setDragging] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [pdfReady, setPdfReady] = useState(false);
+
+  const imgRef = useRef(null);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (window.pdfjsLib) {
+      setPdfReady(true);
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    script.onload = () => {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      setPdfReady(true);
+    };
+    script.onerror = () => setMessage('❌ Could not load PDF library. Check your internet.');
+    document.head.appendChild(script);
+  }, []);
+
+  useEffect(() => {
+    apiFetch('/api/members')
+      .then(r => r.json())
+      .then(d => setMembers(Array.isArray(d) ? d : []))
+      .catch(() => setMembers([]));
+  }, []);
+
+  const handleImage = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.type === 'application/pdf') {
+      if (!pdfReady) {
+        setMessage('❌ PDF library still loading. Wait 2 seconds and try again.');
+        return;
+      }
+      setMessage('⏳ Rendering PDF page…');
+      try {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          const pdfData = new Uint8Array(reader.result);
+          const pdf = await window.pdfjsLib.getDocument({ data: pdfData }).promise;
+          const page = await pdf.getPage(1);
+          const viewport = page.getViewport({ scale: 2.5 });
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          const ctx = canvas.getContext('2d');
+          await page.render({ canvasContext: ctx, viewport }).promise;
+          setImageSrc(canvas.toDataURL('image/png'));
+          setCrops([]);
+          setMessage('✅ PDF loaded. Drag a box over a signature.');
+        };
+        reader.readAsArrayBuffer(file);
+      } catch (err) {
+        setMessage('❌ Failed to read PDF: ' + err.message);
+      }
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      setMessage('❌ Only image files (JPG/PNG) or PDFs are allowed.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setImageSrc(reader.result);
+      setCrops([]);
+      setMessage('✅ Image loaded. Drag a box over a signature.');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const getPos = (e) => {
+    const rect = imgRef.current.getBoundingClientRect();
+    const scaleX = imgRef.current.naturalWidth / rect.width;
+    const scaleY = imgRef.current.naturalHeight / rect.height;
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
+      dispX: clientX - rect.left,
+      dispY: clientY - rect.top,
+      scaleX,
+      scaleY
+    };
+  };
+
+  const startDraw = (e) => {
+    if (!imageSrc) return;
+    if (e.target.dataset.crop) return;
+    const p = getPos(e);
+    setDrawing({ startX: p.x, startY: p.y, curX: p.x, curY: p.y });
+  };
+
+  const moveDraw = (e) => {
+    if (drawing) {
+      const p = getPos(e);
+      setDrawing({ ...drawing, curX: p.x, curY: p.y });
+      return;
+    }
+    if (dragging) {
+      const p = getPos(e);
+      const dx = (p.dispX - dragging.startX) / dragging.scaleX;
+      const dy = (p.dispY - dragging.startY) / dragging.scaleY;
+      setCrops(prev => prev.map(c => {
+        if (c.id !== dragging.id) return c;
+        if (dragging.mode === 'move') {
+          return { ...c, x: dragging.orig.x + dx, y: dragging.orig.y + dy };
+        }
+        return { ...c, w: Math.max(20, dragging.orig.w + dx), h: Math.max(15, dragging.orig.h + dy) };
+      }));
+    }
+  };
+
+  const endDraw = () => {
+    if (drawing) {
+      const x = Math.min(drawing.startX, drawing.curX);
+      const y = Math.min(drawing.startY, drawing.curY);
+      const w = Math.abs(drawing.curX - drawing.startX);
+      const h = Math.abs(drawing.curY - drawing.startY);
+      if (w > 15 && h > 10) {
+        setCrops(prev => [...prev, {
+          id: Date.now(), x, y, w, h, memberId: '', saved: false, preview: ''
+        }]);
+      }
+      setDrawing(null);
+    }
+    if (dragging) setDragging(null);
+  };
+
+  const startCropDrag = (e, crop, mode) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const p = getPos(e);
+    setDragging({
+      id: crop.id, mode,
+      startX: p.dispX, startY: p.dispY,
+      scaleX: p.scaleX, scaleY: p.scaleY,
+      orig: { x: crop.x, y: crop.y, w: crop.w, h: crop.h }
+    });
+  };
+
+   // ============ CROP + CLEAN: transparent background, black ink ============
+  const cropToBase64 = (crop) => {
+    return new Promise((resolve, reject) => {
+      const img = imgRef.current;
+      if (!img) return reject(new Error('no img'));
+      const canvas = document.createElement('canvas');
+      canvas.width = crop.w;
+      canvas.height = crop.h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
+
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imgData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i], g = data[i + 1], b = data[i + 2];
+        const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+        
+        // If pixel is bright (paper), make it completely transparent
+        if (lum >= 180) { 
+          data[i + 3] = 0; 
+        } else {
+          // If pixel is dark (ink), make it pure black
+          data[i] = 0; data[i + 1] = 0; data[i + 2] = 0; data[i + 3] = 255;
+        }
+      }
+      ctx.putImageData(imgData, 0, 0);
+      resolve(canvas.toDataURL('image/png'));
+    });
+  };
+
+  const saveCrop = async (crop) => {
+    if (!crop.memberId) {
+      setMessage('❌ Pick a member for this crop first');
+      return;
+    }
+    setSaving(true);
+    setMessage('⏳ Saving…');
+    try {
+      const base64 = await cropToBase64(crop);
+      const res = await apiFetch(`/api/members/${crop.memberId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ signature: base64 })
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Save failed');
+      setCrops(prev => prev.map(c => c.id === crop.id ? { ...c, saved: true, preview: base64 } : c));
+      setMessage('✅ Signature saved to member');
+    } catch (err) {
+      setMessage('❌ ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateCropMember = (id, memberId) => {
+    setCrops(prev => prev.map(c => c.id === id ? { ...c, memberId, saved: false } : c));
+  };
+
+  const removeCrop = (id) => setCrops(prev => prev.filter(c => c.id !== id));
+  const clearAll = () => {
+    if (!confirm('Clear all crops? (saved signatures on members are not affected)')) return;
+    setCrops([]);
+  };
+
+  const memberLabel = (m) => `${m.firstName} ${m.surname} — ${m.memberNumber}`;
+
+  return (
+    <div style={{ padding: '24px', maxWidth: '1400px', margin: '0 auto', fontFamily: 'Segoe UI, sans-serif' }}>
+      <h1>✂️ Split Signatures</h1>
+      <p style={{ color: '#64748b' }}>
+        Upload a page with multiple signatures (image or PDF), drag a box around each person's signature,
+        and assign it to that member.
+      </p>
+
+      {message && (
+        <div style={{
+          padding: '12px', borderRadius: '8px', marginBottom: '20px',
+          background: message.startsWith('✅') ? '#dcfce7' : message.startsWith('⏳') ? '#fef9e7' : '#fee2e2',
+          color: message.startsWith('✅') ? '#065f46' : message.startsWith('⏳') ? '#b45309' : '#991b1b'
+        }}>{message}</div>
+      )}
+
+      {!imageSrc && (
+        <div style={{ padding: '40px', border: '2px dashed #94a3b8', borderRadius: '12px', textAlign: 'center', background: '#f8fafc' }}>
+          <p style={{ fontSize: '16px', marginBottom: '16px' }}>Upload the image or PDF with signatures</p>
+          <input type="file" accept="image/*,application/pdf" onChange={handleImage} />
+          <p style={{ fontSize: '12px', color: '#64748b', marginTop: '10px' }}>
+            JPG, PNG, or PDF. If your PDF has many pages, only the first page is used.
+          </p>
+        </div>
+      )}
+
+      {imageSrc && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: '20px', marginTop: '20px' }}>
+          <div>
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+              <label style={btnSecondary}>
+                📁 Change file
+                <input type="file" accept="image/*,application/pdf" onChange={handleImage} style={{ display: 'none' }} />
+              </label>
+              {crops.length > 0 && (
+                <button onClick={clearAll} style={btnDanger}>Clear all boxes</button>
+              )}
+            </div>
+
+            <div
+              ref={wrapRef}
+              style={{ position: 'relative', userSelect: 'none', border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden', cursor: 'crosshair' }}
+              onMouseDown={startDraw}
+              onMouseMove={moveDraw}
+              onMouseUp={endDraw}
+              onMouseLeave={endDraw}
+            >
+              <img
+                ref={imgRef}
+                src={imageSrc}
+                alt="Signatures"
+                draggable={false}
+                style={{ display: 'block', width: '100%', height: 'auto' }}
+              />
+
+              {imgRef.current && crops.map(c => {
+                const rect = imgRef.current.getBoundingClientRect();
+                const sx = rect.width / imgRef.current.naturalWidth;
+                const sy = rect.height / imgRef.current.naturalHeight;
+                return (
+                  <div key={c.id}
+                    data-crop="1"
+                    style={{
+                      position: 'absolute',
+                      left: c.x * sx, top: c.y * sy,
+                      width: c.w * sx, height: c.h * sy,
+                      border: `2px solid ${c.saved ? '#16a34a' : '#2563eb'}`,
+                      background: c.saved ? 'rgba(22,163,74,0.15)' : 'rgba(37,99,235,0.15)',
+                      cursor: 'move'
+                    }}
+                    onMouseDown={(e) => startCropDrag(e, c, 'move')}
+                  >
+                    <div
+                      onMouseDown={(e) => startCropDrag(e, c, 'resize')}
+                      style={{
+                        position: 'absolute', right: -6, bottom: -6,
+                        width: 12, height: 12,
+                        background: c.saved ? '#16a34a' : '#2563eb',
+                        borderRadius: '50%',
+                        cursor: 'nwse-resize',
+                        border: '2px solid #fff'
+                      }}
+                    />
+                  </div>
+                );
+              })}
+
+              {drawing && imgRef.current && (() => {
+                const rect = imgRef.current.getBoundingClientRect();
+                const sx = rect.width / imgRef.current.naturalWidth;
+                const sy = rect.height / imgRef.current.naturalHeight;
+                return (
+                  <div style={{
+                    position: 'absolute',
+                    left: Math.min(drawing.startX, drawing.curX) * sx,
+                    top: Math.min(drawing.startY, drawing.curY) * sy,
+                    width: Math.abs(drawing.curX - drawing.startX) * sx,
+                    height: Math.abs(drawing.curY - drawing.startY) * sy,
+                    border: '2px dashed #f59e0b',
+                    background: 'rgba(245,158,11,0.15)',
+                    pointerEvents: 'none'
+                  }} />
+                );
+              })()}
+            </div>
+
+            <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>
+              Drag on empty space to create a new box. Drag inside a box to move it. Drag the small dot to resize.
+            </p>
+          </div>
+
+          <div style={{ background: '#f8fafc', borderRadius: '12px', padding: '16px', height: 'fit-content', position: 'sticky', top: '20px' }}>
+            <h3 style={{ marginTop: 0 }}>Crops ({crops.length})</h3>
+            {crops.length === 0 && <p style={{ color: '#64748b', fontSize: '13px' }}>No boxes yet. Drag over a signature to start.</p>}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '70vh', overflowY: 'auto' }}>
+              {crops.map((c, i) => (
+                <div key={c.id} style={{
+                  background: '#fff', border: `1px solid ${c.saved ? '#16a34a' : '#e2e8f0'}`,
+                  borderRadius: '8px', padding: '10px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <strong style={{ fontSize: '13px' }}>Box #{i + 1} {c.saved && '✅'}</strong>
+                    <button onClick={() => removeCrop(c.id)} style={{
+                      background: 'transparent', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '14px'
+                    }}>✕</button>
+                  </div>
+
+                  <select
+                    value={c.memberId}
+                    onChange={(e) => updateCropMember(c.id, e.target.value)}
+                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #d1d5db', marginBottom: '8px', fontSize: '13px' }}
+                  >
+                    <option value="">— pick member —</option>
+                    {members.map(m => (
+                      <option key={m._id} value={m._id}>{memberLabel(m)}</option>
+                    ))}
+                  </select>
+
+                  <button
+                    onClick={() => saveCrop(c)}
+                    disabled={saving || !c.memberId}
+                    style={{
+                      width: '100%', padding: '8px', borderRadius: '6px', border: 'none',
+                      background: c.saved ? '#16a34a' : '#2563eb', color: '#fff',
+                      fontWeight: '600', cursor: saving ? 'wait' : 'pointer',
+                      opacity: !c.memberId ? 0.5 : 1
+                    }}
+                  >
+                    {c.saved ? 'Saved ✓' : 'Save to member'}
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ marginTop: '16px', borderTop: '1px solid #e2e8f0', paddingTop: '12px' }}>
+              <a href="/members" style={{ color: '#2563eb', textDecoration: 'none', fontSize: '13px' }}>
+                ← Back to Members
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const btnSecondary = { padding: '8px 16px', background: '#e5e7eb', color: '#1f2937', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', fontSize: '14px', display: 'inline-block' };
+const btnDanger = { padding: '8px 16px', background: '#dc3545', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', fontSize: '14px' };

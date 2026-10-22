@@ -17,6 +17,14 @@ const DESCRIPTION_OPTIONS = [
   'Facilitation'
 ];
 
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+const PAYMENT_METHODS = [
+  { value: 'cash', label: '💵 Cash' },
+  { value: 'bank', label: '🏦 Bank' },
+  { value: 'mobile_money', label: '📱 Mobile Money' }
+];
+
 export default function SavingsPage() {
   const [summary, setSummary] = useState({ generalSavings: 0, memberSavings: 0, clubCapital: 0 });
   const [memberSavings, setMemberSavings] = useState([]);
@@ -37,9 +45,27 @@ export default function SavingsPage() {
     date: new Date().toISOString().split('T')[0],
     donationType: 'member',
     donorName: '',
-    membershipType: 'first_time'
+    membershipType: 'first_time',
+    paymentMethod: 'cash'
   });
   const [setup, setSetup] = useState({ year: new Date().getFullYear(), amount: '', firstTime: 0, renewal: 0 });
+
+  // ── Bulk entry state ──
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkForm, setBulkForm] = useState({
+    category: 'monthly',
+    mode: 'all',
+    memberId: '',
+    scope: 'month',
+    month: new Date().getMonth() + 1,
+    year: new Date().getFullYear(),
+    amount: '',
+    description: '',
+    paymentMethod: 'cash'
+  });
+  const [bulkPreview, setBulkPreview] = useState(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState('');
 
   useEffect(() => { fetchAll(); }, []);
 
@@ -94,7 +120,8 @@ export default function SavingsPage() {
           memberId: '', amount: '', description: 'Monthly Contribution',
           shareType: 'golden', shareQuantity: 1,
           date: new Date().toISOString().split('T')[0],
-          donationType: 'member', donorName: '', membershipType: 'first_time'
+          donationType: 'member', donorName: '', membershipType: 'first_time',
+          paymentMethod: 'cash'
         });
         fetchAll();
       } else {
@@ -104,31 +131,6 @@ export default function SavingsPage() {
     } catch (err) {
       alert('❌ Network error');
     }
-  };
-
-  const saveSetup = async (type) => {
-    try {
-      let url, body;
-      if (type === 'agreed-monthly') {
-        url = '/api/savings/settings/agreed-monthly';
-        body = { year: setup.year, amount: parseFloat(setup.amount) };
-      } else if (type === 'membership-fees') {
-        url = '/api/savings/settings/membership-fees';
-        body = {
-          year: setup.year,
-          firstTime: parseFloat(setup.firstTime),
-          renewal: parseFloat(setup.renewal)
-        };
-      }
-      const res = await apiFetch(url, {
-        method: 'POST',
-        body: JSON.stringify(body)
-      });
-      if (res.ok) {
-        alert('✅ Saved!');
-        fetchAll();
-      }
-    } catch (err) { alert('Error'); }
   };
 
   const handleDateChange = (value) => {
@@ -164,6 +166,91 @@ export default function SavingsPage() {
     setForm(prev => ({ ...prev, shareType, shareQuantity: quantity, amount: amount || '' }));
   };
 
+  // ── BULK ENTRY ──
+  const bulkPreviewRun = async () => {
+    setBulkMsg('');
+    setBulkPreview(null);
+
+    if (!bulkForm.amount || Number(bulkForm.amount) <= 0) return setBulkMsg('❌ Enter a valid amount');
+    if (bulkForm.mode === 'single' && !bulkForm.memberId) return setBulkMsg('❌ Select a member');
+
+    setBulkBusy(true);
+    try {
+      const res = await apiFetch('/api/bulk-savings/preview', {
+        method: 'POST',
+        body: JSON.stringify({
+          category: bulkForm.category,
+          mode: bulkForm.mode,
+          memberId: bulkForm.mode === 'single' ? bulkForm.memberId : null,
+          scope: bulkForm.scope,
+          month: bulkForm.scope === 'month' ? Number(bulkForm.month) : null,
+          year: Number(bulkForm.year),
+          amount: Number(bulkForm.amount),
+          paymentMethod: bulkForm.paymentMethod
+        })
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Preview failed');
+      setBulkPreview(d);
+    } catch (err) {
+      setBulkMsg('❌ ' + err.message);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const bulkCommit = async () => {
+    if (!bulkPreview) return;
+    const scopeLabel = bulkForm.scope === 'year' ? `all 12 months of ${bulkForm.year}` : `${MONTHS[bulkForm.month - 1]} ${bulkForm.year}`;
+    const targetLabel = bulkForm.mode === 'single' ? '1 member' : `${bulkPreview.membersAffected} members`;
+    if (!confirm(`⚠️ This will apply UGX ${Number(bulkForm.amount).toLocaleString()} to ${targetLabel} for ${scopeLabel}.\n\n${bulkPreview.willOverwrite > 0 ? `${bulkPreview.willOverwrite} existing record(s) will be OVERWRITTEN. ` : ''}${bulkPreview.willCreate} new record(s) will be created.\n\nTotal: UGX ${bulkPreview.totalNewAmount.toLocaleString()}\n\nProceed?`)) return;
+
+    setBulkBusy(true);
+    setBulkMsg('');
+    try {
+      const res = await apiFetch('/api/bulk-savings/commit', {
+        method: 'POST',
+        body: JSON.stringify({
+          category: bulkForm.category,
+          mode: bulkForm.mode,
+          memberId: bulkForm.mode === 'single' ? bulkForm.memberId : null,
+          scope: bulkForm.scope,
+          month: bulkForm.scope === 'month' ? Number(bulkForm.month) : null,
+          year: Number(bulkForm.year),
+          amount: Number(bulkForm.amount),
+          paymentMethod: bulkForm.paymentMethod,
+          description: bulkForm.description
+        })
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Commit failed');
+      setBulkMsg(`✅ Created ${d.createdCount} record(s)${d.overwrittenCount > 0 ? ` (${d.overwrittenCount} overwritten)` : ''}. Total: UGX ${d.totalAmount.toLocaleString()}`);
+      setBulkPreview(null);
+      fetchAll();
+    } catch (err) {
+      setBulkMsg('❌ ' + err.message);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const closeBulk = () => {
+    setBulkOpen(false);
+    setBulkPreview(null);
+    setBulkMsg('');
+    setBulkForm({
+      category: 'monthly',
+      mode: 'all',
+      memberId: '',
+      scope: 'month',
+      month: new Date().getMonth() + 1,
+      year: new Date().getFullYear(),
+      amount: '',
+      description: '',
+      paymentMethod: 'cash'
+    });
+  };
+
   if (loading) return <div style={{ padding: '40px' }}>Loading...</div>;
 
   const currentYear = new Date(form.date).getFullYear();
@@ -178,11 +265,19 @@ export default function SavingsPage() {
     );
   });
 
+  // Payment picker shared by all modals
+  const PaymentMethodPicker = () => (
+    <Field label="Payment Method">
+      <select value={form.paymentMethod} onChange={e => setForm({ ...form, paymentMethod: e.target.value })} style={input}>
+        {PAYMENT_METHODS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+      </select>
+    </Field>
+  );
+
   return (
     <div style={{ padding: '24px', maxWidth: '1300px', margin: '0 auto', fontFamily: 'Segoe UI, sans-serif' }}>
       <h1 style={{ color: '#1e293b' }}>💰 Savings & Income</h1>
 
-      {/* Action Buttons */}
       <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '16px' }}>
         <Btn onClick={() => setModal('monthly')} color="#2563eb">➕ Add Monthly Savings</Btn>
         <Btn onClick={() => setModal('extra')} color="#22c55e">➕ Add Extra Savings</Btn>
@@ -192,28 +287,25 @@ export default function SavingsPage() {
         <Btn onClick={() => setModal('donation')} color="#f59e0b">➕ Add Donation</Btn>
         <Btn onClick={() => setModal('misc')} color="#eab308">➕ Add Miscellaneous</Btn>
         <Btn onClick={() => setModal('settings')} color="#6b7280">⚙️ Savings Settings</Btn>
+        <Btn onClick={() => setBulkOpen(true)} color="#db2777">📦 Bulk Entry</Btn>
         <a href="/savings/multi-entry" style={{ padding: '10px 18px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', textDecoration: 'none' }}>🧾 Add Multiple</a>
-        <a href="/withdrawals" style={{ padding: '10px 18px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', textDecoration: 'none' }}>💸 Withdrawals</a>
+        <a href="/withdrawals" style={{ padding: '10px 18px', background: '#dc2626', color: '#fff', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', textDecoration: 'none' }}>💸 Withdrawals</a>
       </div>
 
-      {/* PDF Reports + Links */}
       <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '16px' }}>
-        <Btn onClick={() => setPdfModal({ title: 'Club Capital Report', url: 'https://pesaflow-api-jpll.onrender.com/api/savings/club-capital-report' })} color="#1e40af">📄 Club Capital Report</Btn>
-        <Btn onClick={() => setPdfModal({ title: 'General Report', url: 'https://pesaflow-api-jpll.onrender.com/api/savings/general-report' })} color="#7c3aed">📊 General Report</Btn>
+        <Btn onClick={() => setPdfModal({ title: 'Club Capital Report', url: 'http://localhost:5000/api/savings/club-capital-report' })} color="#1e40af">📄 Club Capital Report</Btn>
+        <Btn onClick={() => setPdfModal({ title: 'General Report', url: 'http://localhost:5000/api/savings/general-report' })} color="#7c3aed">📊 General Report</Btn>
         <a href="/receipts" style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', borderRadius: '8px', textDecoration: 'none', fontSize: '14px', fontWeight: '600' }}>🧾 Receipts</a>
       </div>
 
-      {/* Summary Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '16px' }}>
         <Card title="General Savings" value={summary.generalSavings || 0} color="#0369a1" bg="#e0f2fe" icon="🏦" />
         <Card title="Total Member Savings" value={summary.memberSavings || 0} color="#15803d" bg="#dcfce7" icon="👥" />
         <Card title="Total Club Capital" value={summary.clubCapital || 0} color="#b45309" bg="#fef9e7" icon="🏛️" />
       </div>
 
-      {/* Member Savings Table */}
       <h2 style={{ color: '#1e293b' }}>Member Savings</h2>
 
-      {/* Search bar */}
       <div style={{ marginTop: '12px', marginBottom: '8px' }}>
         <input
           type="text"
@@ -264,7 +356,7 @@ export default function SavingsPage() {
                 <td style={{ padding: '12px', minWidth: '240px' }}>
                   <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'nowrap' }}>
                     <a href={`/all-transactions?member=${m._id}`} style={{ padding: '5px 10px', background: '#3b82f6', color: '#fff', borderRadius: '6px', textDecoration: 'none', fontSize: '12px', whiteSpace: 'nowrap' }}>View</a>
-                    <button onClick={() => setPdfModal({ title: `Statement — ${m.name}`, url: `https://pesaflow-api-jpll.onrender.com/api/savings/member-statement/${m._id}` })} style={{ padding: '5px 10px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', whiteSpace: 'nowrap' }}>PDF</button>
+                    <button onClick={() => setPdfModal({ title: `Statement — ${m.name}`, url: `http://localhost:5000/api/savings/member-statement/${m._id}` })} style={{ padding: '5px 10px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', whiteSpace: 'nowrap' }}>PDF</button>
                     <a href={`/receipts?member=${m._id}`} style={{ padding: '5px 10px', background: '#0891b2', color: '#fff', borderRadius: '6px', textDecoration: 'none', fontSize: '12px', whiteSpace: 'nowrap' }}>🧾</a>
                     <a href={`/withdrawals?member=${m._id}`} style={{ padding: '5px 10px', background: '#dc2626', color: '#fff', borderRadius: '6px', textDecoration: 'none', fontSize: '12px', whiteSpace: 'nowrap' }}>💸</a>
                   </div>
@@ -347,6 +439,8 @@ export default function SavingsPage() {
               {modal === 'shares' && sharePrices[form.shareType] && <small style={{ color: '#64748b' }}>Auto-calculated: {form.shareQuantity} × UGX {(sharePrices[form.shareType].price || 0).toLocaleString()}</small>}
               {modal === 'membership' && <small style={{ color: '#64748b' }}>Auto-filled from year's fee. Editable.</small>}
             </Field>
+
+            <PaymentMethodPicker />
 
             <Field label="Description">
               <select value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} style={input}>
@@ -463,18 +557,175 @@ export default function SavingsPage() {
         </Modal>
       )}
 
-      {/* PDF OPTIONS MODAL */}
+      {/* BULK ENTRY MODAL */}
+      {bulkOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1200, padding: '20px' }}>
+          <div style={{ background: '#fff', padding: '28px', borderRadius: '16px', width: '700px', maxWidth: '95vw', maxHeight: '92vh', overflow: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <h2 style={{ margin: 0, color: '#1e293b' }}>📦 Bulk Entry</h2>
+              <button onClick={closeBulk} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer' }}>✕</button>
+            </div>
+
+            <div style={{ background: '#fdf2f8', border: '1px solid #fbcfe8', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '12px', color: '#831843' }}>
+              Apply the same amount to <strong>one member</strong> or <strong>all active members</strong>, for a <strong>single month</strong> or <strong>all 12 months</strong>. Existing records for the same month + category will be <strong>overwritten</strong>. Every run is tracked and can be reversed.
+            </div>
+
+            {/* Who? */}
+            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', fontSize: '13px', color: '#334155' }}>Who?</label>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
+              <ToggleBtn active={bulkForm.mode === 'single'} onClick={() => { setBulkForm({ ...bulkForm, mode: 'single' }); setBulkPreview(null); }}>Single Member</ToggleBtn>
+              <ToggleBtn active={bulkForm.mode === 'all'} onClick={() => { setBulkForm({ ...bulkForm, mode: 'all', memberId: '' }); setBulkPreview(null); }}>All Members</ToggleBtn>
+            </div>
+
+            {bulkForm.mode === 'single' && (
+              <Field label="Member">
+                <select value={bulkForm.memberId} onChange={e => { setBulkForm({ ...bulkForm, memberId: e.target.value }); setBulkPreview(null); }} style={input}>
+                  <option value="">— Select member —</option>
+                  {members.map(m => <option key={m._id} value={m._id}>{m.firstName} {m.surname} ({m.memberNumber})</option>)}
+                </select>
+              </Field>
+            )}
+
+            {/* When? */}
+            <label style={{ display: 'block', marginTop: '8px', marginBottom: '6px', fontWeight: '600', fontSize: '13px', color: '#334155' }}>When?</label>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
+              <ToggleBtn active={bulkForm.scope === 'month'} onClick={() => { setBulkForm({ ...bulkForm, scope: 'month' }); setBulkPreview(null); }}>Single Month</ToggleBtn>
+              <ToggleBtn active={bulkForm.scope === 'year'} onClick={() => { setBulkForm({ ...bulkForm, scope: 'year' }); setBulkPreview(null); }}>Full Year (12 months)</ToggleBtn>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: bulkForm.scope === 'month' ? '1fr 1fr' : '1fr', gap: '12px' }}>
+              {bulkForm.scope === 'month' && (
+                <Field label="Month">
+                  <select value={bulkForm.month} onChange={e => { setBulkForm({ ...bulkForm, month: Number(e.target.value) }); setBulkPreview(null); }} style={input}>
+                    {MONTHS.map((name, i) => <option key={i} value={i + 1}>{name}</option>)}
+                  </select>
+                </Field>
+              )}
+              <Field label="Year">
+                <input type="number" min="2015" max="2100" value={bulkForm.year} onChange={e => { setBulkForm({ ...bulkForm, year: Number(e.target.value) }); setBulkPreview(null); }} style={input} />
+              </Field>
+            </div>
+
+            <Field label="Category">
+              <select value={bulkForm.category} onChange={e => { setBulkForm({ ...bulkForm, category: e.target.value }); setBulkPreview(null); }} style={input}>
+                <option value="monthly">Monthly Savings (member balance)</option>
+                <option value="misc">Miscellaneous / Compulsory (Club Capital)</option>
+              </select>
+            </Field>
+
+            <Field label="Amount per Record (UGX)">
+              <input type="number" value={bulkForm.amount} onChange={e => { setBulkForm({ ...bulkForm, amount: e.target.value }); setBulkPreview(null); }} style={input} placeholder="e.g. 20000" />
+            </Field>
+
+            <Field label="Payment Method">
+              <select value={bulkForm.paymentMethod} onChange={e => setBulkForm({ ...bulkForm, paymentMethod: e.target.value })} style={input}>
+                {PAYMENT_METHODS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+              </select>
+            </Field>
+
+            <Field label="Description (optional)">
+              <input type="text" value={bulkForm.description} onChange={e => setBulkForm({ ...bulkForm, description: e.target.value })} style={input} placeholder="e.g. Backfill 2025 monthly savings" />
+            </Field>
+
+            {bulkMsg && (
+              <div style={{ padding: '12px', borderRadius: '8px', marginBottom: '16px', background: bulkMsg.startsWith('✅') ? '#dcfce7' : '#fee2e2', color: bulkMsg.startsWith('✅') ? '#065f46' : '#991b1b', fontWeight: '600', fontSize: '13px' }}>{bulkMsg}</div>
+            )}
+
+            {!bulkPreview && (
+              <button onClick={bulkPreviewRun} disabled={bulkBusy} style={{ padding: '12px 24px', background: bulkBusy ? '#94a3b8' : '#db2777', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: '700', fontSize: '14px', cursor: bulkBusy ? 'wait' : 'pointer', width: '100%', marginTop: '8px' }}>
+                {bulkBusy ? 'Analysing…' : '🔍 Preview Impact'}
+              </button>
+            )}
+
+            {bulkPreview && (
+              <div style={{ marginTop: '16px' }}>
+                {bulkPreview.warning && (
+                  <div style={{ padding: '12px', borderRadius: '8px', marginBottom: '12px', background: '#fef9e7', border: '1px solid #fcd34d', color: '#92400e', fontWeight: '600', fontSize: '12px' }}>
+                    ⚠️ {bulkPreview.warning}
+                  </div>
+                )}
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '16px' }}>
+                  <StatTile label="Records Total" value={bulkPreview.totalRecords} color="#0369a1" />
+                  <StatTile label="Will Create" value={bulkPreview.willCreate} color="#15803d" />
+                  <StatTile label="Will Overwrite" value={bulkPreview.willOverwrite} color="#b45309" />
+                </div>
+
+                <div style={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '14px', marginBottom: '16px', fontSize: '13px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <span style={{ color: '#64748b' }}>Scope:</span>
+                    <strong>{bulkPreview.membersAffected} member(s) × {bulkPreview.monthsAffected} month(s)</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <span style={{ color: '#64748b' }}>New total to be added:</span>
+                    <strong>UGX {bulkPreview.totalNewAmount.toLocaleString()}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <span style={{ color: '#64748b' }}>Existing to be removed:</span>
+                    <strong>UGX {bulkPreview.totalPreviousAmount.toLocaleString()}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '6px', borderTop: '1px solid #e5e7eb', marginTop: '6px' }}>
+                    <span style={{ color: '#64748b' }}>Net change:</span>
+                    <strong style={{ color: bulkPreview.netChange >= 0 ? '#15803d' : '#dc2626' }}>
+                      {bulkPreview.netChange >= 0 ? '+' : ''}UGX {bulkPreview.netChange.toLocaleString()}
+                    </strong>
+                  </div>
+                  {bulkPreview.estimatedSeconds > 1 && (
+                    <div style={{ marginTop: '6px', fontSize: '11px', color: '#94a3b8' }}>
+                      Estimated run time: ~{bulkPreview.estimatedSeconds}s
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button onClick={bulkCommit} disabled={bulkBusy} style={{ padding: '12px 24px', background: bulkBusy ? '#94a3b8' : '#15803d', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: '700', fontSize: '14px', cursor: bulkBusy ? 'wait' : 'pointer', flex: 1 }}>
+                    {bulkBusy ? 'Committing…' : `✓ Confirm & Commit (${bulkPreview.totalRecords} record${bulkPreview.totalRecords === 1 ? '' : 's'})`}
+                  </button>
+                  <button onClick={() => setBulkPreview(null)} disabled={bulkBusy} style={{ padding: '12px 24px', background: '#e5e7eb', color: '#1f2937', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>
+                    Back
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {pdfModal && (
         <PdfOptionsModal title={pdfModal.title} baseUrl={pdfModal.url} onClose={() => setPdfModal(null)} />
       )}
 
-      {/* Back to Dashboard */}
       <div style={{ marginTop: '32px', textAlign: 'center' }}>
         <a href="/dashboard" style={{ display: 'inline-block', padding: '12px 28px', background: '#0f3460', color: '#fff', borderRadius: '8px', textDecoration: 'none', fontWeight: '600', fontSize: '14px' }}>← Back to Dashboard</a>
       </div>
     </div>
   );
 }
+
+const ToggleBtn = ({ active, onClick, children }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    style={{
+      padding: '10px 20px',
+      background: active ? '#db2777' : '#fff',
+      color: active ? '#fff' : '#475569',
+      border: `2px solid ${active ? '#db2777' : '#e5e7eb'}`,
+      borderRadius: '10px',
+      fontWeight: '700',
+      fontSize: '13px',
+      cursor: 'pointer',
+      flex: 1
+    }}
+  >{children}</button>
+);
+
+const StatTile = ({ label, value, color }) => (
+  <div style={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px', textAlign: 'center' }}>
+    <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: '600' }}>{label}</div>
+    <div style={{ fontSize: '22px', fontWeight: '700', color }}>{value}</div>
+  </div>
+);
 
 const labelFor = (cat) => {
   const labels = {

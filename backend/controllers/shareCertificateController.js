@@ -294,8 +294,7 @@ exports.cancelCertificate = async (req, res) => {
 exports.getMemberCertificates = async (req, res) => {
   try {
     const certs = await ShareCertificate.find({
-      memberId: req.params.memberId,
-      status: 'issued'
+      memberId: req.params.memberId
     }).sort('-issueDate');
     res.json({ certificates: certs, total: certs.length });
   } catch (error) {

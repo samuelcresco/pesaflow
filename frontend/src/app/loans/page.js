@@ -25,6 +25,7 @@ export default function LoansPage() {
   const [scheduleModal, setScheduleModal] = useState(null);
   const [pdfModal, setPdfModal] = useState(null);
   const [interestEarned, setInterestEarned] = useState(0);
+  const [loanExpenses, setLoanExpenses] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
   const [overdueCount, setOverdueCount] = useState(0);
   const [interestBalance, setInterestBalance] = useState(0);
@@ -49,6 +50,7 @@ export default function LoansPage() {
     fetchInterest();
     fetchPending();
     fetchOverdue();
+    fetchLoanExpenses();
   }, []);
 
   const fetchAll = async () => {
@@ -63,6 +65,14 @@ export default function LoansPage() {
       setClubCapital(s?.clubCapital || 0);
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
+  };
+
+  const fetchLoanExpenses = async () => {
+    try {
+      const res = await apiFetch('/api/loans/loan-expenses-total');
+      const d = await res.json();
+      setLoanExpenses(d.total || 0);
+    } catch (err) { console.error(err); }
   };
 
   const fetchFund = async () => {
@@ -99,6 +109,46 @@ export default function LoansPage() {
       setOverdueCount(d.overdue || 0);
     } catch (err) { console.error(err); }
   };
+
+  const disbursedStatuses = ['disbursed', 'active', 'closed'];
+  const activeStatuses = ['disbursed', 'active'];
+
+  const totalDisbursed = loans
+    .filter(l => disbursedStatuses.includes(l.status))
+    .reduce((s, l) => s + Number(l.amount || 0), 0);
+
+  const totalToBePaid = loans
+    .filter(l => disbursedStatuses.includes(l.status))
+    .reduce((s, l) => s + Number(l.totalRepayable || 0), 0);
+
+  const totalPaid = loans.reduce((s, l) => s + Number(l.paidAmount || 0), 0);
+
+  const outstanding = loans
+    .filter(l => activeStatuses.includes(l.status))
+    .reduce((s, l) => {
+      const repayable = Number(l.totalRepayable || 0);
+      const paid = Number(l.paidAmount || 0);
+      return s + Math.max(0, repayable - paid);
+    }, 0);
+
+  const overdueAmount = loans.reduce((s, l) => {
+    const reps = Array.isArray(l.repayments) ? l.repayments : [];
+    const overdue = reps.filter(r =>
+      r.status !== 'paid' && new Date(r.dueDate) < new Date()
+    );
+    return s + overdue.reduce((sum, r) => sum + Number(r.amountDue || r.amount || 0), 0);
+  }, 0);
+
+  const totalInterestEarned = loans.reduce((s, l) => {
+    const loanTotal = Number(l.totalRepayable || 0);
+    const loanPrincipal = Number(l.amount || 0);
+    const paid = Number(l.paidAmount || 0);
+    if (loanTotal === 0) return s;
+    const ratio = (loanTotal - loanPrincipal) / loanTotal;
+    return s + paid * ratio;
+  }, 0);
+
+  const activeLoansCount = loans.filter(l => l.status === 'active').length;
 
   const handleMemberChange = async (memberId) => {
     setForm(prev => ({ ...prev, memberId }));
@@ -140,12 +190,14 @@ export default function LoansPage() {
     } catch (err) { setError('Network error'); }
   };
 
-  const updateStatus = async (id, status) => {
+  const updateStatus = async (id, status, extra = {}) => {
     const res = await apiFetch(`/api/loans/${id}/status`, {
       method: 'PUT',
-      body: JSON.stringify({ status })
+      body: JSON.stringify({ status, ...extra })
     });
+    const d = await res.json();
     if (res.ok) { fetchAll(); fetchFund(); }
+    else alert('❌ ' + (d.error || 'Failed'));
   };
 
   const handleFund = async () => {
@@ -316,20 +368,23 @@ export default function LoansPage() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '8px', marginBottom: '12px' }}>
-        <Card title="Total Pending" value={loans.filter(l => l.status === 'pending').length} color="#b45309" bg="#fef9e7" icon="⏳" />
-        <Card title="Active Loans" value={loans.filter(l => l.status === 'active').length} color="#15803d" bg="#dcfce7" icon="✅" />
-        <Card title="Overdue" value={overdueCount} color="#dc2626" bg="#fee2e2" icon="⚠️" />
-        <Card title="Outstanding" value={loans.filter(l => ['active', 'disbursed'].includes(l.status)).reduce((s, l) => s + Number(l.outstandingBalance || l.totalRepayable || 0), 0)} color="#dc2626" bg="#fee2e2" icon="📌" isMoney />
-        <Card title="Total to be Repaid" value={loans.reduce((s, l) => s + Number(l.totalRepayable || 0), 0)} color="#7c3aed" bg="#f3e8ff" icon="💵" isMoney />
-        <Card title="Interest Earned" value={interestEarned} color="#0891b2" bg="#cffafe" icon="📈" isMoney />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px', marginBottom: '12px' }}>
+        <Card title="Total Disbursed" value={totalDisbursed} color="#0369a1" bg="#e0f2fe" icon="💵" isMoney />
+        <Card title="Total to be Paid" value={totalToBePaid} color="#7c3aed" bg="#f3e8ff" icon="💰" isMoney />
+        <Card title="Total Paid" value={totalPaid} color="#15803d" bg="#dcfce7" icon="✅" isMoney />
+        <Card title="Outstanding" value={outstanding} color="#dc2626" bg="#fee2e2" icon="📌" isMoney />
+        <Card title="Total Overdue" value={overdueAmount} color="#b91c1c" bg="#fee2e2" icon="⚠️" isMoney />
+        <Card title="Interest Earned" value={totalInterestEarned} color="#0891b2" bg="#cffafe" icon="📈" isMoney />
+        <Card title="Active Loans" value={activeLoansCount} color="#15803d" bg="#dcfce7" icon="✅" />
+        <Card title="Loan Expenses" value={loanExpenses} color="#b45309" bg="#fef9e7" icon="🧾" isMoney />
+        <Card title="Net Loan Profit" value={totalInterestEarned - loanExpenses} color={totalInterestEarned - loanExpenses >= 0 ? '#15803d' : '#dc2626'} bg={totalInterestEarned - loanExpenses >= 0 ? '#dcfce7' : '#fee2e2'} icon="💹" isMoney />
       </div>
 
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
         <Btn onClick={() => setShowApply(true)} color="#2563eb">➕ New Loan Application</Btn>
         <Btn onClick={() => setShowFund(true)} color="#f59e0b">💰 Fund from Club Capital</Btn>
         <Btn onClick={() => setShowExternal(true)} color="#0891b2">💵 Fund from External Funder</Btn>
-        <Btn onClick={() => setPdfModal({ title: 'General Loan Statement', url: 'https://pesaflow-api-jpll.onrender.com/api/loans/general-loan-statement/pdf' })} color="#7c3aed">📄 General Loan Statement</Btn>
+        <Btn onClick={() => setPdfModal({ title: 'General Loan Statement', url: `${API}/api/loans/general-loan-statement/pdf` })} color="#7c3aed">📄 General Loan Statement</Btn>
         <Btn onClick={() => setShowExtractToLoan(true)} color="#16a34a">💵 Extract Interest to Loan Fund</Btn>
         <Btn onClick={() => setShowExtractToClub(true)} color="#dc2626">🏛️ Extract Interest to Club Capital</Btn>
       </div>
@@ -354,7 +409,7 @@ export default function LoansPage() {
         )}
       </div>
       <div style={{ display: 'flex', gap: '2px', borderBottom: '2px solid #e5e7eb', marginBottom: '12px', flexWrap: 'wrap' }}>
-        {['all','pending','approved','disbursed','active','closed','rejected','writeOff'].map(t => (
+        {['all','pending','approved','rejected','disbursed','active','closed','writeOff'].map(t => (
           <button key={t} onClick={() => setActiveTab(t)} style={{
             padding: '6px 12px', background: 'transparent', border: 'none',
             borderBottom: activeTab === t ? '3px solid #2563eb' : '3px solid transparent',
@@ -386,11 +441,25 @@ export default function LoansPage() {
                   <td style={{ ...td, fontWeight: '600', color: getLoanBalance(loan) > 0 ? '#dc2626' : '#15803d' }}>
                     UGX {getLoanBalance(loan).toLocaleString()}
                   </td>
-                  <td style={td}><strong>{loan.status}</strong></td>
+                 <td style={td}>
+  <strong>{loan.status}</strong>
+  {loan.status === 'rejected' && loan.rejectionReason && (
+    <div style={{ fontSize: '10px', color: '#991b1b', marginTop: '2px', maxWidth: '140px' }}>
+      Reason: {loan.rejectionReason}
+    </div>
+  )}
+</td>
                   <td style={td}>
                     {loan.status === 'pending' && (<>
                       <button onClick={() => updateStatus(loan._id, 'approved')} style={mini('#22c55e')}>Approve</button>
-                      <button onClick={() => updateStatus(loan._id, 'rejected')} style={mini('#ef4444')}>Reject</button>
+                      <button onClick={() => {
+  const reason = prompt('Reason for rejection:');
+  if (!reason || !reason.trim()) {
+    alert('Rejection reason is required');
+    return;
+  }
+  updateStatus(loan._id, 'rejected', { reason: reason.trim() });
+}} style={mini('#ef4444')}>Reject</button>
                     </>)}
                     {loan.status === 'approved' && <button onClick={() => updateStatus(loan._id, 'disbursed')} style={mini('#f59e0b')}>Disburse</button>}
                     {loan.status === 'disbursed' && <button onClick={() => updateStatus(loan._id, 'active')} style={mini('#8b5cf6')}>Set Active</button>}
@@ -632,7 +701,7 @@ export default function LoansPage() {
                 setScheduleModal(null);
                 setPdfModal({
                   title: `Repayment Schedule — ${memberName}`,
-                  url: `https://pesaflow-api-jpll.onrender.com/api/loans/repayment-schedule/${loanId}/pdf`
+                  url: `${API}/api/loans/repayment-schedule/${loanId}/pdf`
                 });
               }}
               style={btn('#7c3aed')}

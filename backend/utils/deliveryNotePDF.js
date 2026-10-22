@@ -1,10 +1,13 @@
 const PDFDocument = require('pdfkit');
 const QRCode = require('qrcode');
 const ClubProfile = require('../models/ClubProfile');
+const Leader = require('../models/Leader');
+const { getLeaderSignature } = require('./leaderHelper');
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-UG');
 
-async function generateDeliveryNotePDF(note, res) {
+async function generateDeliveryNotePDF(note, res, requestedSigs) {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   const doc = new PDFDocument({ size: 'A5', margin: 0, layout: 'portrait' });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename=${note.noteNumber}.pdf`);
@@ -15,7 +18,6 @@ async function generateDeliveryNotePDF(note, res) {
   const M = 30;
   const contentW = pageW - (M * 2);
 
-  // ---- Fetch club profile ----
   let profile = await ClubProfile.findOne();
   if (!profile) profile = {};
   const clubName = profile.name || 'CRESTED SS INVESTMENT CLUB LTD';
@@ -25,39 +27,43 @@ async function generateDeliveryNotePDF(note, res) {
 
   const accent = '#0891b2';
 
-  // Top bar
-  doc.rect(0, 0, pageW, 6).fill(accent);
+  // ── Top accent bar ──
+  doc.rect(0, 0, pageW, 8).fill(accent);
 
-  // Header
-  doc.fillColor('#0f3460').fontSize(13).font('Helvetica-Bold');
-  doc.text(clubName.toUpperCase(), M, 20, { width: contentW, align: 'center' });
+  // ── 1. Club name — large + bold, on its own line ──
+  doc.fillColor('#0f3460').fontSize(16).font('Helvetica-Bold');
+  doc.text(clubName.toUpperCase(), M, 26, { width: contentW, align: 'center' });
 
+  // ── 2. Tagline ("Strengthen Wealth") — clearly separated below the name, bold + larger ──
   if (clubTagline) {
-    doc.font('Helvetica-Oblique').fontSize(7).fillColor('#64748b');
-    doc.text(clubTagline, M, 38, { width: contentW, align: 'center' });
+    doc.font('Helvetica-Bold').fontSize(10).fillColor('#475569');
+    doc.text(clubTagline, M, 64, { width: contentW, align: 'center' });
   }
+
+  // ── 3. Contact line — grouped with the tagline, bold + visible ──
   if (contactLine) {
-    doc.font('Helvetica').fontSize(7).fillColor('#94a3b8');
-    doc.text(contactLine, M, 48, { width: contentW, align: 'center' });
+    doc.font('Helvetica-Bold').fontSize(8.5).fillColor('#64748b');
+    doc.text(contactLine, M, 82, { width: contentW, align: 'center', lineGap: 2 });
   }
 
-  // Note number + title (Moved down to avoid overlapping the club name)
-  const rightW = 130;
-  doc.font('Helvetica-Bold').fontSize(10).fillColor(accent);
-  doc.text('DELIVERY NOTE', pageW - M - rightW, 55, { width: rightW, align: 'right' });
-  doc.font('Helvetica').fontSize(6.5).fillColor('#94a3b8');
-  doc.text('Note No.', pageW - M - rightW, 70, { width: rightW, align: 'right' });
-  doc.font('Helvetica-Bold').fontSize(9).fillColor('#0f3460');
-  doc.text(note.noteNumber, pageW - M - rightW, 80, { width: rightW, align: 'right' });
+  // ── 4. DELIVERY NOTE title + note number (right side, below the identity block) ──
+  const rightW = 140;
+  const dnY = 115;
+  doc.font('Helvetica-Bold').fontSize(11).fillColor(accent);
+  doc.text('DELIVERY NOTE', pageW - M - rightW, dnY, { width: rightW, align: 'right' });
+  doc.font('Helvetica').fontSize(7).fillColor('#94a3b8');
+  doc.text('Note No.', pageW - M - rightW, dnY + 20, { width: rightW, align: 'right' });
+  doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#0f3460');
+  doc.text(note.noteNumber, pageW - M - rightW, dnY + 32, { width: rightW, align: 'right' });
 
-  doc.moveTo(M, 95).lineTo(pageW - M, 95).strokeColor('#cbd5e1').lineWidth(1).stroke();
+  // ── 5. Divider ──
+  doc.moveTo(M, 166).lineTo(pageW - M, 166).strokeColor('#cbd5e1').lineWidth(1).stroke();
 
-  // Recipient + date
   const dateStr = new Date(note.date).toLocaleDateString('en-GB', {
     day: '2-digit', month: 'short', year: 'numeric'
   });
 
-  let y = 105;
+  let y = 176;
   doc.fontSize(8).fillColor('#1e293b').font('Helvetica-Bold');
   doc.text('Deliver To:', M, y);
   doc.font('Helvetica').fontSize(10).text(note.recipientName || '—', M + 60, y - 2);
@@ -77,7 +83,6 @@ async function generateDeliveryNotePDF(note, res) {
     y += 14;
   }
 
-  // Items table
   y += 8;
   const colItemX = M + 8;
   const colQtyX = M + contentW - 200;
@@ -110,7 +115,6 @@ async function generateDeliveryNotePDF(note, res) {
     rowIdx++;
   }
 
-  // Total (Fixed: Taller box and wider text area so numbers don't get cut off)
   if (note.totalValue > 0) {
     y += 4;
     doc.rect(M, y, contentW, 30).fill(accent);
@@ -122,7 +126,6 @@ async function generateDeliveryNotePDF(note, res) {
     y += 10;
   }
 
-  // Notes
   if (note.notes) {
     doc.font('Helvetica-Bold').fillColor('#64748b').fontSize(8);
     doc.text('Notes:', M, y);
@@ -130,10 +133,8 @@ async function generateDeliveryNotePDF(note, res) {
     y += 18;
   }
 
-  // Bottom section — QR + signatures
+  // ==================== DYNAMIC SIGNATURES ====================
   const bottomY = pageH - 130;
-
-  // QR
   const qrSize = 75;
   const qrX = M;
   try {
@@ -145,23 +146,43 @@ async function generateDeliveryNotePDF(note, res) {
     doc.text('Scan to verify', qrX, bottomY + qrSize + 2, { width: qrSize, align: 'center' });
   } catch (e) { console.error('QR error:', e.message); }
 
-  // Signatures
-  const sigX = M + qrSize + 20;
-  const sigW = contentW - qrSize - 20;
-  const halfW = (sigW - 10) / 2;
+  const sigStartX = M + qrSize + 20;
+  const sigAreaW = contentW - qrSize - 20;
 
-  doc.moveTo(sigX, bottomY + 40).lineTo(sigX + halfW, bottomY + 40).strokeColor('#1e293b').lineWidth(0.8).stroke();
-  doc.font('Helvetica-Bold').fillColor(accent).fontSize(7);
-  doc.text('DELIVERED BY', sigX, bottomY + 45, { width: halfW });
-  doc.font('Helvetica-Bold').fillColor('#1e293b').fontSize(9);
-  doc.text(note.deliveredBy || '__________________', sigX, bottomY + 58, { width: halfW });
+  const customerSigW = 80;
+  const leaderAreaW = sigAreaW - customerSigW - 15;
 
-  const recX = sigX + halfW + 10;
-  doc.moveTo(recX, bottomY + 40).lineTo(recX + halfW, bottomY + 40).strokeColor('#1e293b').lineWidth(0.8).stroke();
-  doc.font('Helvetica-Bold').fillColor(accent).fontSize(7);
-  doc.text('RECEIVED BY (Signature)', recX, bottomY + 45, { width: halfW });
+  let signatories = requestedSigs && requestedSigs.length > 0 ? requestedSigs : ['treasurer'];
+  const numSigs = signatories.length;
+  const spacing = 10;
+  const sigW = (leaderAreaW - (numSigs - 1) * spacing) / numSigs;
 
-  // Footer
+  for (let i = 0; i < numSigs; i++) {
+    const role = signatories[i];
+    const x = sigStartX + i * (sigW + spacing);
+
+    const leader = await Leader.findOne({ role, active: true });
+    const sigBuffer = await getLeaderSignature(role);
+
+    doc.moveTo(x, bottomY + 40).lineTo(x + sigW, bottomY + 40).strokeColor('#1e293b').lineWidth(0.8).stroke();
+
+    if (sigBuffer) {
+      try {
+        doc.image(sigBuffer, x, bottomY + 22, { fit: [sigW, 15], align: 'center', valign: 'bottom' });
+      } catch (e) {}
+    }
+
+    doc.font('Helvetica-Bold').fillColor(accent).fontSize(6.5);
+    doc.text(role.replace(/_/g, ' ').toUpperCase(), x, bottomY + 45, { width: sigW, align: 'center' });
+    doc.font('Helvetica-Bold').fillColor('#1e293b').fontSize(7.5);
+    doc.text(leader?.name || '__________________', x, bottomY + 56, { width: sigW, align: 'center' });
+  }
+
+  const recX = sigStartX + leaderAreaW + 15;
+  doc.moveTo(recX, bottomY + 40).lineTo(recX + customerSigW, bottomY + 40).strokeColor('#1e293b').lineWidth(0.8).stroke();
+  doc.font('Helvetica-Bold').fillColor(accent).fontSize(6.5);
+  doc.text('RECEIVED BY', recX, bottomY + 45, { width: customerSigW, align: 'center' });
+
   doc.font('Helvetica-Oblique').fontSize(6).fillColor('#94a3b8');
   doc.text('This is a computer-generated delivery note. Retain for your records.', 0, pageH - 15, { align: 'center', width: pageW });
 

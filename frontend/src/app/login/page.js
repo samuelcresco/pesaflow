@@ -26,7 +26,8 @@ export default function AdminLoginPage() {
         setLoading(false);
         return;
       }
-      saveSession(data.user, data.role || 'admin', data.cardAccess || 'all');
+      const admin = data.admin;
+      saveSession(admin, 'admin', 'all');
       router.replace('/dashboard');
     } catch (err) {
       setError('Network error. Please check your connection.');

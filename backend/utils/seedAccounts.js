@@ -3,6 +3,12 @@ const Account = require('../models/Account');
 const defaultAccounts = [
   { code: '1000', name: 'Club Capital', type: 'Equity', category: 'club' },
   { code: '1010', name: 'Member Savings', type: 'Equity', category: 'member' },
+  { code: '1020', name: 'Membership Fees', type: 'Equity', category: 'club' },
+  { code: '1030', name: 'Share Capital', type: 'Equity', category: 'club' },
+  { code: '1040', name: 'Constitution Fees', type: 'Equity', category: 'club' },
+  { code: '1050', name: 'Penalties', type: 'Equity', category: 'club' },
+  { code: '1060', name: 'Miscellaneous', type: 'Equity', category: 'club' },
+  { code: '1070', name: 'Donations', type: 'Equity', category: 'club' },
   { code: '1100', name: 'Loan Business Fund', type: 'Asset', category: 'loan' },
   { code: '1150', name: 'Loans Receivable', type: 'Asset', category: 'loan' },
   { code: '1200', name: 'Club Investments', type: 'Asset', category: 'investment' },

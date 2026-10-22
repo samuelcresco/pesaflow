@@ -8,6 +8,7 @@ const Account = require('../models/Account');
 const Leader = require('../models/Leader');
 const PDFDocument = require('pdfkit');
 const { createJournalEntry } = require('../utils/journalHelper');
+const { getLeaderSignature } = require('../utils/leaderHelper');
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-UG');
 
@@ -97,13 +98,18 @@ exports.applyLoan = async (req, res) => {
     const durationMonths = parseInt(duration) || 1;
     const timeInYears = durationMonths / 12;
     const totalRepayable = amount + (amount * (interestRate / 100) * timeInYears);
+    const feePercent = Number(settings.loanProcessingFeePercent) || 0;
+    const processingFee = Math.round(Number(amount) * (feePercent / 100) * 100) / 100;
 
     const loan = new Loan({
       memberId, type, amount, interestRate,
       durationMonths, duration: durationMonths,
       scheduleUnit: scheduleUnit || 'weekly',
       totalRepayable: Math.round(totalRepayable * 100) / 100,
-      purpose: purpose || '', status: 'pending', appliedBy: 'member'
+      purpose: purpose || '', status: 'pending', appliedBy: 'member',
+      processingFee,
+      processingFeePercent: feePercent,
+      netDisbursed: Math.max(0, Number(amount) - processingFee)
     });
     await loan.save();
 
@@ -135,31 +141,59 @@ exports.applyLoan = async (req, res) => {
 // ==================== GET ALL LOANS ====================
 exports.getAllLoans = async (req, res) => {
   try {
-    const loans = await Loan.find()
-      .populate('memberId', 'firstName surname memberNumber')
-      .sort('-createdAt')
-      .lean();
+    const loans = await Loan.find().populate('memberId').sort('-createdAt');
 
-    for (const loan of loans) {
-      loan.repayments = await Repayment.find({ loanId: loan._id })
-        .select('installmentNumber status amountDue amountPaid')
-        .lean();
-    }
+    const withRepayments = await Promise.all(loans.map(async (loan) => {
+      const Repayment = require('../models/Repayment');
+      const repayments = await Repayment.find({ loanId: loan._id }).sort('installmentNumber');
 
-    res.json(loans);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+      const paidAmount = repayments
+        .filter(r => r.status === 'paid')
+        .reduce((s, r) => s + Number(r.amountPaid || r.amountDue || 0), 0);
+
+      const outstandingBalance = repayments
+        .filter(r => r.status !== 'paid')
+        .reduce((s, r) => s + Number(r.amountDue || 0), 0);
+
+      return {
+        ...loan.toObject(),
+        repayments,
+        paidAmount: Math.round(paidAmount * 100) / 100,
+        outstandingBalance: Math.round(outstandingBalance * 100) / 100,
+        totalInstallments: repayments.length,
+        paidInstallments: repayments.filter(r => r.status === 'paid').length
+      };
+    }));
+
+    res.json(withRepayments);
+  } catch (err) {
+    console.error('getAllLoans error:', err);
+    res.status(500).json({ error: err.message });
   }
 };
 
 // ==================== UPDATE STATUS ====================
 exports.updateLoanStatus = async (req, res) => {
   try {
-    const { status } = req.body;
+    const { status, reason, processingFeePercent } = req.body;
     const loan = await Loan.findById(req.params.id).populate('memberId');
     if (!loan) return res.status(404).json({ error: 'Loan not found' });
 
     const previousStatus = loan.status;
+
+    if (status === 'rejected') {
+      if (!reason || !String(reason).trim()) {
+        return res.status(400).json({ error: 'Rejection reason is required' });
+      }
+      loan.rejectionReason = String(reason).trim();
+    }
+
+    if (status === 'approved' && processingFeePercent !== undefined && processingFeePercent !== null && processingFeePercent !== '') {
+      const pct = Number(processingFeePercent) || 0;
+      loan.processingFeePercent = pct;
+      loan.processingFee = Math.round(Number(loan.amount) * (pct / 100) * 100) / 100;
+    }
+
     loan.status = status;
     if (status === 'approved') loan.approvedDate = new Date();
     if (status === 'disbursed') loan.disbursedDate = new Date();
@@ -175,22 +209,38 @@ exports.updateLoanStatus = async (req, res) => {
         await member.save();
       }
 
+      const fee = Number(loan.processingFee) || 0;
+      const netDisbursed = Math.max(0, Number(loan.amount) - fee);
+      loan.netDisbursed = netDisbursed;
+      await loan.save();
+
       const loanAcc = await Account.findOne({ code: '1100' });
       if (loanAcc) {
-        loanAcc.balance = (Number(loanAcc.balance) || 0) - Number(loan.amount);
+        loanAcc.balance = (Number(loanAcc.balance) || 0) - netDisbursed;
         await loanAcc.save();
       }
 
+      if (fee > 0) {
+        const interestAcc = await Account.findOne({ code: '1300' });
+        if (interestAcc) {
+          interestAcc.balance = (Number(interestAcc.balance) || 0) + fee;
+          await interestAcc.save();
+        }
+      }
+
       try {
+        const lines = [
+          { accountCode: '1150', debit: Number(loan.amount) },
+          { accountCode: '1100', credit: netDisbursed }
+        ];
+        if (fee > 0) lines.push({ accountCode: '1300', credit: fee });
+
         await createJournalEntry({
           date: new Date(),
-          description: `Loan disbursed to ${loan.memberId.firstName} ${loan.memberId.surname}`,
+          description: `Loan disbursed to ${loan.memberId.firstName} ${loan.memberId.surname} (fee UGX ${fmt(fee)})`,
           reference: loan._id.toString(),
           sourceType: 'loan',
-          lines: [
-            { accountCode: '1150', debit: Number(loan.amount) },
-            { accountCode: '1100', credit: Number(loan.amount) }
-          ]
+          lines
         });
       } catch (e) { console.error('Disburse journal:', e.message); }
     }
@@ -353,32 +403,201 @@ exports.memberLoanStatementPDF = async (req, res) => {
   try {
     const member = await Member.findById(req.params.memberId);
     if (!member) return res.status(404).json({ error: 'Member not found' });
-    const loans = await Loan.find({ memberId: member._id });
-    const doc = new PDFDocument({ margin: 50 });
+
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    const requestedSigs = req.query.signatories ? req.query.signatories.split(',') : [];
+
+    const loans = await Loan.find({ memberId: member._id }).sort('-createdAt');
+    const allRepayments = await Repayment.find({ loanId: { $in: loans.map(l => l._id) } }).sort('dueDate');
+    const ClubProfile = require('../models/ClubProfile');
+    let profile = await ClubProfile.findOne();
+    if (!profile) profile = {};
+
+    const doc = new PDFDocument({ size: 'A4', margin: 0 });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=loan-statement-${member.memberNumber}.pdf`);
     doc.pipe(res);
 
-    doc.rect(0, 0, doc.page.width, 80).fill('#0f3460');
-    doc.fillColor('#fff').fontSize(18).text('CRESTED SS INVESTMENT CLUB LTD', 50, 25);
-    doc.fontSize(12).text('Member Loan Statement', 50, 50);
-    doc.fillColor('#000').moveDown(3);
-    doc.text(`Member: ${member.firstName} ${member.surname}`);
-    doc.text(`Member No: ${member.memberNumber}`);
-    doc.text(`Generated: ${new Date().toLocaleString()}`);
-    doc.moveDown();
-    loans.forEach((l, i) => {
-      doc.fontSize(10).text(`${i + 1}. ${l.type} — ${fmt(l.amount)} — ${l.status} — Total: ${fmt(l.totalRepayable)}`);
-    });
+    const M = 50;
+    const pageW = doc.page.width;
+    const contentW = pageW - M * 2;
+
+    const clubName = profile.name || 'CRESTED SS INVESTMENT CLUB LTD';
+    const contactParts = [profile.location, profile.address, profile.contact, profile.email].filter(Boolean);
+    const contactLine = contactParts.join('  •  ');
+
+    // HEADER
+    doc.rect(0, 0, pageW, 110).fill('#0f3460');
+    doc.fillColor('#fff').font('Helvetica-Bold').fontSize(15);
+    doc.text(clubName, M, 24, { width: contentW - 200 });
+    doc.font('Helvetica').fontSize(8).fillColor('#cbd5e1');
+    let hy = doc.y + 2;
+    if (contactLine) { doc.text(contactLine, M, hy, { width: contentW - 200 }); hy = doc.y + 2; }
+    doc.text(`Generated: ${new Date().toLocaleString()}`, M, hy, { width: contentW - 200 });
+    doc.fillColor('#fff').font('Helvetica-Bold').fontSize(15);
+    doc.text('MEMBER LOAN STATEMENT', pageW - M - 200, 30, { width: 200, align: 'right' });
+
+    // INFO
+    let y = 128;
+    doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(11);
+    doc.text('Member:', M, y);
+    doc.font('Helvetica').text(`${member.firstName || ''} ${member.surname || ''}`.trim(), M + 70, y);
+    doc.font('Helvetica-Bold').text('Member No:', pageW - M - 250, y);
+    doc.font('Helvetica').text(member.memberNumber || '—', pageW - M - 170, y);
+    y += 18;
+    doc.font('Helvetica-Bold').text('Phone:', M, y);
+    doc.font('Helvetica').text(member.phone || member.contact || '—', M + 70, y);
+    y += 18;
+    doc.font('Helvetica-Bold').text('Date:', pageW - M - 250, y);
+    doc.font('Helvetica').text(new Date().toLocaleDateString(), pageW - M - 170, y);
+    y += 26;
+
+    // SUMMARY
+    const totalBorrowed = loans.reduce((s, l) => s + Number(l.amount || 0), 0);
+    const totalRepayable = loans.reduce((s, l) => s + Number(l.totalRepayable || 0), 0);
+    const totalPaid = allRepayments.filter(r => r.status === 'paid').reduce((s, r) => s + Number(r.amountPaid || r.amountDue || 0), 0);
+    const totalOutstanding = totalRepayable - totalPaid;
+
+    doc.rect(M, y, contentW, 50).fill('#f1f5f9');
+    doc.fillColor('#0f3460').font('Helvetica-Bold').fontSize(9);
+    doc.text('TOTAL BORROWED', M + 10, y + 8);
+    doc.text('TOTAL REPAYABLE', M + 130, y + 8);
+    doc.text('TOTAL PAID', M + 250, y + 8);
+    doc.text('OUTSTANDING', M + 370, y + 8);
+    doc.text('LOANS', M + 490, y + 8);
+
+    doc.fontSize(13).fillColor('#1e293b');
+    doc.text(`UGX ${fmt(totalBorrowed)}`, M + 10, y + 24);
+    doc.text(`UGX ${fmt(totalRepayable)}`, M + 130, y + 24);
+    doc.fillColor('#15803d').text(`UGX ${fmt(totalPaid)}`, M + 250, y + 24);
+    doc.fillColor('#dc2626').text(`UGX ${fmt(totalOutstanding)}`, M + 370, y + 24);
+    doc.fillColor('#0f3460').text(`${loans.length}`, M + 490, y + 24);
+
+    y += 70;
+
+    // LOANS
+    for (const loan of loans) {
+      const repayments = allRepayments.filter(r => r.loanId.toString() === loan._id.toString());
+      if (y > doc.page.height - 200) { doc.addPage(); y = 50; }
+
+      doc.rect(M, y, contentW, 26).fill('#0f3460');
+      doc.fillColor('#fff').font('Helvetica-Bold').fontSize(11);
+      doc.text(`LOAN: ${String(loan.type || '').toUpperCase()}`, M + 10, y + 8);
+      doc.font('Helvetica').fontSize(9);
+      doc.text(`Status: ${loan.status || '—'}`, pageW - M - 200, y + 9, { width: 190, align: 'right' });
+      y += 26;
+
+      const cells = [
+        ['Principal', `UGX ${fmt(loan.amount)}`],
+        ['Interest Rate', `${loan.interestRate || 0}%`],
+        ['Duration', `${loan.durationMonths || 0} months`],
+        ['Total Repayable', `UGX ${fmt(loan.totalRepayable)}`],
+        ['Disbursed', loan.disbursedDate ? new Date(loan.disbursedDate).toLocaleDateString() : '—'],
+        ['Schedule', loan.scheduleUnit || '—']
+      ];
+      doc.rect(M, y, contentW, 46).fill('#f8fafc');
+      cells.forEach(([label, value], i) => {
+        const col = i % 3;
+        const row = Math.floor(i / 3);
+        const x = M + 12 + col * (contentW / 3);
+        const cy = y + 8 + row * 20;
+        doc.fillColor('#64748b').font('Helvetica-Bold').fontSize(7).text(label.toUpperCase(), x, cy);
+        doc.fillColor('#1e293b').font('Helvetica').fontSize(9).text(value, x, cy + 9);
+      });
+      y += 56;
+
+      doc.rect(M, y, contentW, 20).fill('#1e293b');
+      doc.fillColor('#fff').font('Helvetica-Bold').fontSize(8);
+      doc.text('#', M + 8, y + 6, { width: 25 });
+      doc.text('DUE DATE', M + 40, y + 6, { width: 80 });
+      doc.text('AMOUNT DUE', M + 130, y + 6, { width: 90, align: 'right' });
+      doc.text('PAID', M + 230, y + 6, { width: 90, align: 'right' });
+      doc.text('BALANCE', M + 330, y + 6, { width: 90, align: 'right' });
+      doc.text('STATUS', M + 430, y + 6, { width: 80 });
+      y += 20;
+
+      let runBal = Number(loan.totalRepayable || 0);
+      repayments.forEach((r, i) => {
+        if (y > doc.page.height - 80) { doc.addPage(); y = 50; }
+        if (i % 2 === 0) doc.rect(M, y, contentW, 18).fill('#f8fafc');
+        doc.fillColor('#1e293b').font('Helvetica').fontSize(8);
+        const due = Number(r.amountDue || 0);
+        const paid = Number(r.amountPaid || 0);
+        runBal = Math.max(0, runBal - paid);
+
+        doc.text(String(r.installmentNumber || i + 1), M + 8, y + 5, { width: 25 });
+        doc.text(new Date(r.dueDate).toLocaleDateString(), M + 40, y + 5, { width: 80 });
+        doc.text(fmt(due), M + 130, y + 5, { width: 90, align: 'right' });
+        doc.fillColor(paid > 0 ? '#15803d' : '#94a3b8');
+        doc.text(paid > 0 ? fmt(paid) : '—', M + 230, y + 5, { width: 90, align: 'right' });
+        doc.fillColor('#1e293b').text(fmt(runBal), M + 330, y + 5, { width: 90, align: 'right' });
+        doc.fillColor(r.status === 'paid' ? '#15803d' : r.status === 'overdue' ? '#dc2626' : '#b45309');
+        doc.font('Helvetica-Bold').text(String(r.status || 'pending').toUpperCase(), M + 430, y + 5, { width: 80 });
+        y += 18;
+      });
+
+      doc.rect(M, y, contentW, 20).fill('#e0f2fe');
+      doc.fillColor('#0369a1').font('Helvetica-Bold').fontSize(8);
+      const loanPaid = repayments.filter(r => r.status === 'paid').reduce((s, r) => s + Number(r.amountPaid || 0), 0);
+      doc.text('LOAN TOTALS', M + 8, y + 6);
+      doc.text(`PAID: UGX ${fmt(loanPaid)}`, M + 200, y + 6, { width: 180, align: 'right' });
+      doc.text(`BALANCE: UGX ${fmt(Math.max(0, Number(loan.totalRepayable) - loanPaid))}`, M + 380, y + 6, { width: 180, align: 'right' });
+      y += 30;
+
+      if (y > doc.page.height - 150) { doc.addPage(); y = 50; }
+    }
+
+    // DYNAMIC SIGNATURES
+    if (y > doc.page.height - 130) { doc.addPage(); y = 80; }
+    y += 20;
+    
+    let signatories = requestedSigs.length > 0 ? requestedSigs : ['treasurer', 'president'];
+    const numSigs = signatories.length;
+    const spacing = 30;
+    const sigW = (contentW - (numSigs - 1) * spacing) / numSigs;
+    const sigY = y;
+
+    for (let i = 0; i < numSigs; i++) {
+      const role = signatories[i];
+      const x = M + i * (sigW + spacing);
+      
+      const leader = await Leader.findOne({ role, active: true });
+      const sigBuffer = await getLeaderSignature(role);
+
+      doc.moveTo(x, sigY).lineTo(x + sigW, sigY).strokeColor('#1e293b').lineWidth(0.8).stroke();
+      
+      if (sigBuffer) {
+        try {
+          doc.image(sigBuffer, x, sigY - 22, { fit: [sigW, 20], align: 'center', valign: 'bottom' });
+        } catch (e) {}
+      }
+
+      doc.font('Helvetica-Bold').fillColor('#0f3460').fontSize(9);
+      doc.text(role.replace(/_/g, ' ').toUpperCase(), x, sigY + 6, { width: sigW, align: 'center' });
+      
+      doc.font('Helvetica-Bold').fillColor('#1e293b').fontSize(10);
+      doc.text(leader?.name || '__________________', x, sigY + 20, { width: sigW, align: 'center' });
+      
+      doc.font('Helvetica').fillColor('#64748b').fontSize(8);
+      doc.text('Date: ____________', x, sigY + 36, { width: sigW, align: 'center' });
+    }
+
+    doc.font('Helvetica-Oblique').fontSize(8).fillColor('#94a3b8');
+    doc.text('This is a computer-generated statement. Retain for your records.', M, doc.page.height - 30, { width: contentW, align: 'center' });
+
     doc.end();
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    if (!res.headersSent) res.status(500).json({ error: error.message });
+    console.error('Loan statement PDF error:', error.message);
   }
 };
 
 // ==================== GENERAL LOAN STATEMENT PDF ====================
 exports.generalLoanStatementPDF = async (req, res) => {
   try {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    const requestedSigs = req.query.signatories ? req.query.signatories.split(',') : [];
+
     const loans = await Loan.find().populate('memberId', 'firstName surname memberNumber');
     const doc = new PDFDocument({ margin: 50 });
     res.setHeader('Content-Type', 'application/pdf');
@@ -419,6 +638,38 @@ exports.generalLoanStatementPDF = async (req, res) => {
     doc.moveDown();
     doc.fontSize(12).font('Helvetica-Bold');
     doc.text(`Total: ${fmt(total)}`, { align: 'right' });
+    
+    doc.moveDown(2);
+    let signatories = requestedSigs.length > 0 ? requestedSigs : ['treasurer', 'president'];
+    const numSigs = signatories.length;
+    const sigStartY = doc.y;
+    const w = (doc.page.width - 100) / numSigs;
+
+    for (let i = 0; i < numSigs; i++) {
+      const role = signatories[i];
+      const x = 50 + (i * w);
+      
+      const leader = await Leader.findOne({ role, active: true });
+      const sigBuffer = await getLeaderSignature(role);
+
+      doc.moveTo(x, sigStartY).lineTo(x + w - 30, sigStartY).stroke();
+      
+      if (sigBuffer) {
+        try {
+          doc.image(sigBuffer, x, sigStartY - 22, { fit: [w - 30, 20], align: 'center', valign: 'bottom' });
+        } catch (e) {}
+      }
+
+      doc.fontSize(9).font('Helvetica-Bold').fillColor('#0f3460');
+      doc.text(role.replace(/_/g, ' ').toUpperCase(), x, sigStartY + 5, { width: w - 30, align: 'center' });
+      
+      doc.fontSize(9).font('Helvetica-Bold').fillColor('#1e293b');
+      doc.text(leader?.name || '__________________', x, sigStartY + 20, { width: w - 30, align: 'center' });
+      
+      doc.fontSize(8).font('Helvetica').fillColor('#64748b');
+      doc.text('Date: ______________', x, sigStartY + 35, { width: w - 30, align: 'center' });
+    }
+
     doc.end();
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -458,6 +709,9 @@ exports.repaymentSchedulePDF = async (req, res) => {
     const loan = await Loan.findById(req.params.id).populate('memberId', 'firstName surname memberNumber');
     if (!loan) return res.status(404).json({ error: 'Loan not found' });
     const repayments = await Repayment.find({ loanId: loan._id }).sort('installmentNumber');
+
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    const requestedSigs = req.query.signatories ? req.query.signatories.split(',') : [];
 
     const doc = new PDFDocument({ margin: 50, size: 'A4' });
     res.setHeader('Content-Type', 'application/pdf');
@@ -532,16 +786,39 @@ exports.repaymentSchedulePDF = async (req, res) => {
     doc.text(fmt(totalPrincipal), 310, totalY + 8, { width: 70, align: 'right' });
     doc.font('Helvetica');
 
-    const sigY = totalY + 70;
-    const w = (doc.page.width - 100) / 3;
-    doc.fontSize(10).fillColor('#000');
-    ['President', 'Secretary', 'Treasurer'].forEach((role, i) => {
-      const x = 50 + (i * w);
-      doc.moveTo(x, sigY).lineTo(x + w - 30, sigY).stroke();
-      doc.text(role, x, sigY + 5, { width: w - 30 });
-      doc.fontSize(8).fillColor('#666').text('Date: ______________', x, sigY + 20, { width: w - 30 });
-      doc.fontSize(10).fillColor('#000');
-    });
+    // ==================== SIGNATURES ====================
+    let signatories = requestedSigs.length > 0 ? requestedSigs : ['treasurer', 'president'];
+    const numSigs = signatories.length;
+    const spacing = 30;
+    const sigW = (doc.page.width - 100 - (numSigs - 1) * spacing) / numSigs;
+    
+    let sigY = totalY + 60;
+    if (sigY > doc.page.height - 80) { doc.addPage(); sigY = 50; }
+
+    for (let i = 0; i < numSigs; i++) {
+      const role = signatories[i];
+      const x = 50 + i * (sigW + spacing);
+      
+      const leader = await Leader.findOne({ role, active: true });
+      const sigBuffer = await getLeaderSignature(role);
+
+      doc.moveTo(x, sigY).lineTo(x + sigW, sigY).strokeColor('#1e293b').lineWidth(0.8).stroke();
+      
+      if (sigBuffer) {
+        try {
+          doc.image(sigBuffer, x, sigY - 22, { fit: [sigW, 20], align: 'center', valign: 'bottom' });
+        } catch (e) {}
+      }
+
+      doc.font('Helvetica-Bold').fillColor('#0f3460').fontSize(9);
+      doc.text(role.replace(/_/g, ' ').toUpperCase(), x, sigY + 6, { width: sigW, align: 'center' });
+      
+      doc.font('Helvetica-Bold').fillColor('#1e293b').fontSize(10);
+      doc.text(leader?.name || '__________________', x, sigY + 20, { width: sigW, align: 'center' });
+      
+      doc.font('Helvetica').fillColor('#64748b').fontSize(8);
+      doc.text('Date: ____________', x, sigY + 36, { width: sigW, align: 'center' });
+    }
 
     doc.end();
   } catch (error) {
@@ -1158,6 +1435,8 @@ exports.getOverdueCount = async (req, res) => {
 // ==================== ALL LOAN SCHEDULES REPORT PDF ====================
 exports.allSchedulesPDF = async (req, res) => {
   try {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    const requestedSigs = req.query.signatories ? req.query.signatories.split(',') : [];
     const { status: statusFilter } = req.query;
 
     const query = {};
@@ -1275,36 +1554,65 @@ exports.allSchedulesPDF = async (req, res) => {
       rowIdx++;
     }
 
-    if (y > doc.page.height - 120) {
-      doc.addPage();
-      y = 60;
-    } else {
-      y += 20;
+    if (y > doc.page.height - 120) { doc.addPage(); y = 60; } else { y += 20; }
+
+    let signatories = requestedSigs.length > 0 ? requestedSigs : ['treasurer', 'president'];
+    const numSigs = signatories.length;
+    const spacing = 30;
+    const sigW = (contentW - (numSigs - 1) * spacing) / numSigs;
+
+    for (let i = 0; i < numSigs; i++) {
+      const role = signatories[i];
+      const x = M + i * (sigW + spacing);
+      
+      const leader = await Leader.findOne({ role, active: true });
+      const sigBuffer = await getLeaderSignature(role);
+
+      doc.moveTo(x, y).lineTo(x + sigW, y).strokeColor('#1e293b').lineWidth(0.8).stroke();
+      
+      if (sigBuffer) {
+        try {
+          doc.image(sigBuffer, x, y - 22, { fit: [sigW, 20], align: 'center', valign: 'bottom' });
+        } catch (e) {}
+      }
+
+      doc.font('Helvetica-Bold').fillColor('#0f3460').fontSize(9);
+      doc.text(role.replace(/_/g, ' ').toUpperCase(), x, y + 6, { width: sigW, align: 'center' });
+      
+      doc.font('Helvetica-Bold').fillColor('#1e293b').fontSize(10);
+      doc.text(leader?.name || '__________________', x, y + 20, { width: sigW, align: 'center' });
+      
+      doc.font('Helvetica').fillColor('#64748b').fontSize(8);
+      doc.text('Date: ____________', x, y + 36, { width: sigW, align: 'center' });
     }
-
-    const w = contentW / 3;
-    const leaders = await Leader.find().sort('order');
-    const treasurer = leaders.find(l => l.role === 'treasurer');
-    const president = leaders.find(l => l.role === 'president');
-
-    doc.fontSize(10).font('Helvetica').fillColor('#000');
-    ['Treasurer', 'Secretary', 'President'].forEach((role, i) => {
-      const x = M + i * w;
-      doc.moveTo(x, y).lineTo(x + w - 30, y).stroke();
-      doc.font('Helvetica-Bold').text(role, x, y + 5, { width: w - 30 });
-      doc.font('Helvetica').fontSize(8).fillColor('#666');
-
-      let leaderName = '';
-      if (role === 'Treasurer') leaderName = treasurer?.name || '';
-      if (role === 'President') leaderName = president?.name || '';
-      doc.text(leaderName || '__________________', x, y + 20, { width: w - 30 });
-      doc.fontSize(7).text('Date: ____________', x, y + 34, { width: w - 30 });
-      doc.fontSize(10).fillColor('#000').font('Helvetica');
-    });
 
     doc.end();
   } catch (error) {
     console.error('All schedules PDF error:', error.message);
     if (!res.headersSent) res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== LOAN EXPENSES TOTAL ====================
+exports.getLoanExpensesTotal = async (req, res) => {
+  try {
+    const Transaction = require('../models/BusinessTransaction');
+    const loanBiz = await Business.findOne({ isSystem: true, type: 'loan' });
+
+    if (!loanBiz) {
+      return res.json({ total: 0, transactions: [] });
+    }
+
+    const txns = await BusinessTransaction.find({
+      businessId: loanBiz._id,
+      type: 'expense'
+    }).sort('-date');
+
+    const total = txns.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+
+    res.json({ total, transactions: txns });
+  } catch (error) {
+    console.error('getLoanExpensesTotal error:', error.message);
+    res.status(500).json({ error: error.message });
   }
 };

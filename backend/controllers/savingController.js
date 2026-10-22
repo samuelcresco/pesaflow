@@ -3,13 +3,51 @@ const Member = require('../models/Member');
 const ClubSetting = require('../models/ClubSetting');
 const Leader = require('../models/Leader');
 const Receipt = require('../models/Receipt');
+const Account = require('../models/Account');
 const { generateReceiptNumber } = require('../utils/receiptNumber');
+const { getLeaderSignature } = require('../utils/leaderHelper');
+const { getMemberAccountCode, ensureMemberAccount } = require('../utils/memberAccountHelper');
+const { writeMemberSavingsJournal } = require('../utils/journalHelper');
 const PDFDocument = require('pdfkit');
 
-// Helper: format money
 const fmt = (n) => Number(n || 0).toLocaleString('en-UG');
 
-// Helper: draw professional header
+const CLUB_CAPITAL_CATEGORIES = ['misc', 'donation', 'penalty', 'business_profit', 'shares', 'membership'];
+
+const CATEGORY_ACCOUNT_MAP = {
+  membership: '1020',
+  shares: '1030',
+  constitution: '1040',
+  penalty: '1050',
+  misc: '1060',
+  donation: '1070',
+  business_profit: '1000'
+};
+
+const CLUB_CAPITAL_ACCOUNTS = ['1000', '1020', '1030', '1040', '1050', '1060', '1070'];
+
+async function bumpAccountByCategory(category, delta) {
+  try {
+    const code = CATEGORY_ACCOUNT_MAP[category] || '1000';
+    let acc = await Account.findOne({ code });
+    if (!acc) {
+      acc = await Account.create({
+        code,
+        name: category,
+        type: 'Equity',
+        balance: Math.max(0, Number(delta) || 0)
+      });
+    } else {
+      acc.balance = Math.max(0, (Number(acc.balance) || 0) + Number(delta || 0));
+      await acc.save();
+    }
+    return acc.balance;
+  } catch (err) {
+    console.error('Account bump error:', err.message);
+    return null;
+  }
+}
+
 function drawHeader(doc, title) {
   doc.rect(0, 0, doc.page.width, 90).fill('#0f3460');
   doc.fillColor('#fff').fontSize(20).text('CRESTED SS INVESTMENT CLUB LTD', 50, 25, { align: 'left' });
@@ -17,38 +55,43 @@ function drawHeader(doc, title) {
   doc.fillColor('#000').moveDown(3);
 }
 
-// Helper: draw signature block
-async function drawSignatures(doc) {
-  const leaders = await Leader.find().sort('order');
-  const president = leaders.find(l => l.role === 'president');
-  const secretary = leaders.find(l => l.role === 'secretary');
-  const treasurer = leaders.find(l => l.role === 'treasurer');
+async function drawSignatures(doc, requestedSigs) {
+  let signatories = requestedSigs && requestedSigs.length > 0
+    ? requestedSigs
+    : ['treasurer', 'president'];
 
   doc.moveDown(2);
-  const y = doc.y;
-  const w = (doc.page.width - 100) / 3;
+  const y = doc.y + 10;
+  const w = (doc.page.width - 100) / signatories.length;
 
-  doc.fontSize(10).fillColor('#000');
-  const names = [
-    { title: 'President', name: president?.name || '' },
-    { title: 'Secretary', name: secretary?.name || '' },
-    { title: 'Treasurer', name: treasurer?.name || '' }
-  ];
-
-  names.forEach((n, i) => {
+  for (let i = 0; i < signatories.length; i++) {
+    const role = signatories[i];
     const x = 50 + (i * w);
-    doc.moveTo(x, y).lineTo(x + w - 30, y).stroke();
-    doc.text(n.title, x, y + 5, { width: w - 30 });
-    doc.fontSize(9).fillColor('#666').text(n.name, x, y + 20, { width: w - 30 });
-    doc.fontSize(8).text('Date: ______________', x, y + 35, { width: w - 30 });
-    doc.fontSize(10).fillColor('#000');
-  });
+
+    const leader = await Leader.findOne({ role, active: true });
+    const sigBuffer = await getLeaderSignature(role);
+
+    doc.moveTo(x, y).lineTo(x + w - 30, y).strokeColor('#1e293b').lineWidth(0.8).stroke();
+
+    if (sigBuffer) {
+      try {
+        doc.image(sigBuffer, x, y - 22, { fit: [w - 30, 20], align: 'center', valign: 'bottom' });
+      } catch (e) {}
+    }
+
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#0f3460');
+    doc.text(role.replace(/_/g, ' ').toUpperCase(), x, y + 5, { width: w - 30, align: 'center' });
+
+    doc.font('Helvetica-Bold').fontSize(10).fillColor('#1e293b');
+    doc.text(leader?.name || '__________________', x, y + 20, { width: w - 30, align: 'center' });
+
+    doc.font('Helvetica').fontSize(8).fillColor('#64748b');
+    doc.text('Date: ______________', x, y + 35, { width: w - 30, align: 'center' });
+  }
 }
 
-// ==================== RECEIPT AUTO-GENERATION HELPER ====================
 async function autoCreateReceipt({ category, memberId, memberName, memberNumber, amount, description, shareType, shareQuantity, membershipType, donationType, donorName, savingId, date }) {
   try {
-    // Map saving category → receipt type
     const typeMap = {
       monthly: 'savings_deposit',
       extra: 'savings_deposit',
@@ -98,7 +141,8 @@ exports.addSaving = async (req, res) => {
     const {
       memberId, category, amount, description, month,
       shareType, shareQuantity, date,
-      donationType, donorName, membershipType, paymentType
+      donationType, donorName, membershipType, paymentType,
+      paymentMethod
     } = req.body;
 
     const memberRequired = ['monthly', 'extra', 'penalty', 'membership', 'shares', 'misc'];
@@ -110,9 +154,10 @@ exports.addSaving = async (req, res) => {
       return res.status(400).json({ error: 'Member required' });
     }
 
+    const method = ['cash', 'bank', 'mobile_money'].includes(paymentMethod) ? paymentMethod : 'cash';
+
     let finalAmount = Number(amount) || 0;
 
-    // Membership fee amounts
     if (category === 'membership') {
       const year = new Date().getFullYear();
       const setting = await ClubSetting.findOne({ year });
@@ -141,14 +186,16 @@ exports.addSaving = async (req, res) => {
       month: month || '',
       shareType: shareType || '',
       shareQuantity: shareQuantity || 0,
-      date: date ? new Date(date) : new Date()
+      date: date ? new Date(date) : new Date(),
+      paymentMethod: method
     });
 
     await saving.save();
 
-    // Update member savings if applicable
     let memberName = '';
     let memberNumber = '';
+    let memberDoc = null;
+
     if (['monthly', 'extra'].includes(category) && memberId) {
       const member = await Member.findById(memberId);
       if (member) {
@@ -156,10 +203,10 @@ exports.addSaving = async (req, res) => {
         await member.save();
         memberName = `${member.firstName} ${member.surname}`;
         memberNumber = member.memberNumber;
+        memberDoc = member;
       }
     }
 
-    // Update member shares
     if (category === 'shares' && memberId && shareType && shareQuantity) {
       const member = await Member.findById(memberId);
       if (member) {
@@ -170,16 +217,42 @@ exports.addSaving = async (req, res) => {
       }
     }
 
-    // Fetch member info for other categories (so receipt shows member name)
     if (memberId && !memberName) {
       const member = await Member.findById(memberId);
       if (member) {
         memberName = `${member.firstName} ${member.surname}`;
         memberNumber = member.memberNumber;
+        memberDoc = memberDoc || member;
       }
     }
 
-    // Auto-generate receipt
+    if (CLUB_CAPITAL_CATEGORIES.includes(category)) {
+      await bumpAccountByCategory(category, finalAmount);
+    }
+
+    if (['monthly', 'extra'].includes(category) && memberDoc) {
+      try {
+        const code = getMemberAccountCode(memberDoc.memberNumber);
+        if (code) {
+          await ensureMemberAccount(memberDoc);
+          await writeMemberSavingsJournal({
+            memberAccountCode: code,
+            memberAccountName: `Member Savings — ${memberDoc.firstName} ${memberDoc.surname} (${memberDoc.memberNumber})`,
+            amount: finalAmount,
+            direction: 'deposit',
+            date: saving.date,
+            description: `${category} savings — ${memberDoc.firstName} ${memberDoc.surname}${description ? ` — ${description}` : ''}`,
+            sourceType: `saving_${category}`,
+            paymentMethod: method
+          });
+        } else {
+          console.warn(`[addSaving] No account code for ${memberDoc.memberNumber} — journal skipped`);
+        }
+      } catch (jErr) {
+        console.error('[addSaving] Journal error:', jErr.message);
+      }
+    }
+
     await autoCreateReceipt({
       category,
       memberId,
@@ -224,9 +297,8 @@ exports.getSummary = async (req, res) => {
       .filter(s => ['monthly', 'extra'].includes(s.category))
       .reduce((s, x) => s + Number(x.amount || 0), 0);
 
-    const capitalTotal = all
-      .filter(s => ['misc', 'donation', 'penalty', 'business_profit', 'shares', 'membership'].includes(s.category))
-      .reduce((s, x) => s + Number(x.amount || 0), 0);
+    const accs = await Account.find({ code: { $in: CLUB_CAPITAL_ACCOUNTS } });
+    const capitalTotal = accs.reduce((s, a) => s + (Number(a.balance) || 0), 0);
 
     res.json({
       generalSavings: total,
@@ -261,11 +333,7 @@ exports.getMemberSavingsList = async (req, res) => {
         monthlySavings: monthly,
         extraSavings: extra,
         totalSavings: monthly + extra,
-        penalties,
-        membership,
-        sharesValue,
-        misc,
-        donation
+        penalties, membership, sharesValue, misc, donation
       };
     });
 
@@ -364,11 +432,14 @@ exports.deleteSaving = async (req, res) => {
     const saving = await Saving.findById(req.params.id);
     if (!saving) return res.status(404).json({ error: 'Transaction not found' });
 
+    let memberDoc = null;
+
     if (['monthly', 'extra'].includes(saving.category) && saving.memberId) {
       const member = await Member.findById(saving.memberId);
       if (member) {
         member.savings = Math.max(0, (Number(member.savings) || 0) - Number(saving.amount || 0));
         await member.save();
+        memberDoc = member;
       }
     }
 
@@ -377,6 +448,31 @@ exports.deleteSaving = async (req, res) => {
       if (member) {
         member.shares[saving.shareType] = Math.max(0, (member.shares[saving.shareType] || 0) - (saving.shareQuantity || 0));
         await member.save();
+      }
+    }
+
+    if (CLUB_CAPITAL_CATEGORIES.includes(saving.category)) {
+      await bumpAccountByCategory(saving.category, -Number(saving.amount || 0));
+    }
+
+    if (['monthly', 'extra'].includes(saving.category) && memberDoc) {
+      try {
+        const code = getMemberAccountCode(memberDoc.memberNumber);
+        if (code) {
+          await ensureMemberAccount(memberDoc);
+          await writeMemberSavingsJournal({
+            memberAccountCode: code,
+            memberAccountName: `Member Savings — ${memberDoc.firstName} ${memberDoc.surname} (${memberDoc.memberNumber})`,
+            amount: Number(saving.amount || 0),
+            direction: 'withdrawal',
+            date: new Date(),
+            description: `Reversal — ${saving.category} savings — ${memberDoc.firstName} ${memberDoc.surname}${saving.description ? ` — ${saving.description}` : ''}`,
+            sourceType: 'saving_delete',
+            paymentMethod: saving.paymentMethod || 'cash'
+          });
+        }
+      } catch (jErr) {
+        console.error('[deleteSaving] Journal reversal error:', jErr.message);
       }
     }
 
@@ -393,11 +489,17 @@ exports.downloadMemberStatement = async (req, res) => {
     const member = await Member.findById(req.params.memberId);
     if (!member) return res.status(404).json({ error: 'Member not found' });
 
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
+    const requestedSigs = req.query.signatories ? req.query.signatories.split(',') : [];
+
     const savings = await Saving.find({ memberId: member._id }).sort('date');
 
     const doc = new PDFDocument({ margin: 50, size: 'A4' });
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=statement-${member.memberNumber}.pdf`);
+    res.setHeader('Content-Disposition', `inline; filename=statement-${member.memberNumber}.pdf`);
     doc.pipe(res);
 
     drawHeader(doc, 'Member Savings Statement');
@@ -440,7 +542,7 @@ exports.downloadMemberStatement = async (req, res) => {
     doc.font('Helvetica');
 
     doc.y = y + 40;
-    await drawSignatures(doc);
+    await drawSignatures(doc, requestedSigs);
 
     doc.end();
   } catch (error) {
@@ -451,13 +553,16 @@ exports.downloadMemberStatement = async (req, res) => {
 // ==================== CLUB CAPITAL PDF ====================
 exports.downloadClubCapitalReport = async (req, res) => {
   try {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    const requestedSigs = req.query.signatories ? req.query.signatories.split(',') : [];
+
     const capital = await Saving.find({
-      category: { $in: ['misc', 'donation', 'penalty', 'business_profit', 'shares', 'membership'] }
+      category: { $in: CLUB_CAPITAL_CATEGORIES }
     }).populate('memberId', 'firstName surname').sort('date');
 
     const doc = new PDFDocument({ margin: 50, size: 'A4' });
     res.setHeader('Content-Type', 'application/pdf');
-   res.setHeader('Content-Disposition', 'inline; filename=club-capital-report.pdf');
+    res.setHeader('Content-Disposition', 'inline; filename=club-capital-report.pdf');
     doc.pipe(res);
 
     drawHeader(doc, 'Club Capital Report');
@@ -501,7 +606,7 @@ exports.downloadClubCapitalReport = async (req, res) => {
     doc.font('Helvetica');
 
     doc.y = y + 40;
-    await drawSignatures(doc);
+    await drawSignatures(doc, requestedSigs);
 
     doc.end();
   } catch (error) {
@@ -512,6 +617,9 @@ exports.downloadClubCapitalReport = async (req, res) => {
 // ==================== GENERAL REPORT PDF ====================
 exports.downloadGeneralReport = async (req, res) => {
   try {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    const requestedSigs = req.query.signatories ? req.query.signatories.split(',') : [];
+
     const all = await Saving.find().populate('memberId', 'firstName surname memberNumber').sort('date');
 
     const doc = new PDFDocument({ margin: 50, size: 'A4' });
@@ -561,7 +669,7 @@ exports.downloadGeneralReport = async (req, res) => {
     doc.font('Helvetica');
 
     doc.y = y + 40;
-    await drawSignatures(doc);
+    await drawSignatures(doc, requestedSigs);
 
     doc.end();
   } catch (error) {
@@ -588,6 +696,9 @@ exports.getExternalDonations = async (req, res) => {
 // ==================== EXTERNAL DONATIONS PDF ====================
 exports.externalDonationsPDF = async (req, res) => {
   try {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    const requestedSigs = req.query.signatories ? req.query.signatories.split(',') : [];
+
     const donations = await Saving.find({
       category: 'donation',
       donationType: 'external'
@@ -595,7 +706,7 @@ exports.externalDonationsPDF = async (req, res) => {
 
     const doc = new PDFDocument({ margin: 50, size: 'A4' });
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename=external-donations.pdf');
+    res.setHeader('Content-Disposition', 'inline; filename=external-donations.pdf');
     doc.pipe(res);
 
     drawHeader(doc, 'External Donations Report');
@@ -637,13 +748,14 @@ exports.externalDonationsPDF = async (req, res) => {
     doc.font('Helvetica');
 
     doc.y = y + 40;
-    await drawSignatures(doc);
+    await drawSignatures(doc, requestedSigs);
 
     doc.end();
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
+
 // ==================== DELETE CLUB SETTING (by year) ====================
 exports.deleteClubSetting = async (req, res) => {
   try {

@@ -10,6 +10,9 @@ const {
   getWindowLabel
 } = require('../utils/withdrawalHelper');
 const { generateReceiptNumber } = require('../utils/receiptNumber');
+const { generateWithdrawalStatementPDF } = require('../utils/withdrawalStatementPDF');
+const { getMemberAccountCode, ensureMemberAccount } = require('../utils/memberAccountHelper');
+const { writeMemberSavingsJournal, writeJournal, PAYMENT_ACCOUNTS } = require('../utils/journalHelper');
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-UG');
 
@@ -29,8 +32,9 @@ exports.updateWithdrawalSettings = async (req, res) => {
     if (!s) s = new WithdrawalSettings();
 
     const fields = [
-      'juneEnabled', 'juneStartDay', 'juneEndDay',
-      'decemberEnabled', 'decemberStartDay', 'decemberEndDay',
+      'juneEnabled', 'juneMonth', 'juneStartDay', 'juneEndDay',
+      'decemberEnabled', 'decemberMonth', 'decemberStartDay', 'decemberEndDay',
+      'dividendWindowEnabled', 'dividendStartMonth', 'dividendStartDay', 'dividendEndMonth', 'dividendEndDay',
       'savingsCapPercent', 'blockOnActiveLoan', 'allowOverride',
       'updatedBy'
     ];
@@ -58,11 +62,14 @@ exports.checkMemberEligibility = async (req, res) => {
     const window = isWithinWindow(new Date(), settings);
     const eligibility = checkEligibility(member, source, amount, new Date(), settings);
 
+    const savings = Number(member.savings) || 0;
+    const cap = Math.floor(savings * (settings.savingsCapPercent / 100));
+
     res.json({
       memberId: member._id,
       memberNumber: member.memberNumber,
       memberName: `${member.firstName} ${member.surname}`,
-      savings: Number(member.savings) || 0,
+      savings,
       dividendBalance: Number(member.dividendBalance) || 0,
       lockedSavings: Number(member.lockedSavings) || 0,
       hasActiveLoan: !!member.activeLoanId,
@@ -71,14 +78,80 @@ exports.checkMemberEligibility = async (req, res) => {
       withdrawalWindow: getWithdrawalWindow(new Date(), settings),
       windowLabel: getWindowLabel(settings),
       allowOverride: settings.allowOverride,
-      savingsCapPercent: settings.savingsCapPercent
+      savingsCapPercent: settings.savingsCapPercent,
+      maxWithdrawable: cap
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
 
-// ==================== REQUEST WITHDRAWAL ====================
+// ==================== MEMBER: SUBMIT SAVINGS WITHDRAWAL REQUEST ====================
+exports.memberRequestWithdrawal = async (req, res) => {
+  try {
+    const memberId = req.params.id;
+    const { amount, notes } = req.body;
+
+    const amt = Number(amount) || 0;
+    if (amt <= 0) return res.status(400).json({ error: 'Amount must be greater than 0' });
+
+    const member = await Member.findById(memberId);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+
+    if (member.activeLoanId) {
+      return res.status(400).json({ error: 'Cannot withdraw savings while a loan is active.' });
+    }
+
+    const settings = await getSettings();
+    const check = checkEligibility(member, 'savings', amt, new Date(), settings);
+
+    if (!check.eligible) {
+      return res.status(400).json({ error: check.reason });
+    }
+
+    const withdrawal = await Withdrawal.create({
+      memberId: member._id,
+      memberName: `${member.firstName} ${member.surname}`,
+      memberNumber: member.memberNumber,
+      source: 'savings',
+      amount: amt,
+      period: check.period,
+      requestedDate: new Date(),
+      status: 'pending',
+      requestedBy: 'member',
+      notes: notes || 'Requested from member portal'
+    });
+
+    res.status(201).json({
+      success: true,
+      message: `Withdrawal request of UGX ${fmt(amt)} submitted. Awaiting admin approval.`,
+      withdrawal
+    });
+  } catch (error) {
+    console.error('memberRequestWithdrawal error:', error.message);
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// ==================== MEMBER: WITHDRAWAL PDF STATEMENT ====================
+exports.memberWithdrawalStatementPDF = async (req, res) => {
+  try {
+    const member = await Member.findById(req.params.id);
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+
+    const withdrawals = await Withdrawal.find({
+      memberId: member._id,
+      source: 'savings'
+    }).sort('-requestedDate');
+
+    await generateWithdrawalStatementPDF({ member, withdrawals }, res);
+  } catch (error) {
+    console.error('memberWithdrawalStatementPDF error:', error.message);
+    if (!res.headersSent) res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== REQUEST WITHDRAWAL (admin) ====================
 exports.requestWithdrawal = async (req, res) => {
   try {
     const { memberId, source, amount, notes, requestedBy, overrideReason } = req.body;
@@ -103,7 +176,6 @@ exports.requestWithdrawal = async (req, res) => {
       return res.status(400).json({ error: check.reason });
     }
 
-    // Save override reason if used
     const finalNotes = check.overrideUsed
       ? `[OVERRIDE: ${overrideReason}] ${notes || ''}`.trim()
       : (notes || '');
@@ -245,13 +317,13 @@ exports.rejectWithdrawal = async (req, res) => {
   }
 };
 
-// ==================== RECORD PAYMENT (also creates receipt) ====================
+// ==================== RECORD PAYMENT (with JOURNAL) ====================
 exports.recordPayment = async (req, res) => {
   try {
     const { paymentMethod, paymentReference, paidBy } = req.body;
 
-    if (!paymentMethod || !['cash', 'mobile_money'].includes(paymentMethod)) {
-      return res.status(400).json({ error: 'Payment method must be cash or mobile_money' });
+    if (!paymentMethod || !['cash', 'bank', 'mobile_money'].includes(paymentMethod)) {
+      return res.status(400).json({ error: 'Payment method must be cash, bank, or mobile_money' });
     }
 
     const withdrawal = await Withdrawal.findById(req.params.id);
@@ -264,7 +336,7 @@ exports.recordPayment = async (req, res) => {
     const member = await Member.findById(withdrawal.memberId);
     if (!member) return res.status(404).json({ error: 'Member not found' });
 
-    // Deduct from correct pocket
+    // ── Deduct member balance ──
     if (withdrawal.source === 'savings') {
       if (Number(member.savings) < withdrawal.amount) {
         return res.status(400).json({ error: `Insufficient savings. Available: UGX ${fmt(member.savings)}` });
@@ -286,7 +358,44 @@ exports.recordPayment = async (req, res) => {
     withdrawal.paymentReference = paymentReference || '';
     await withdrawal.save();
 
-    // ==================== AUTO-CREATE RECEIPT ====================
+    // ── JOURNAL (money leaving the club) ──
+    try {
+      const payAccount = PAYMENT_ACCOUNTS[paymentMethod];
+
+      if (withdrawal.source === 'savings' && payAccount) {
+        const code = getMemberAccountCode(member.memberNumber);
+        if (code) {
+          await ensureMemberAccount(member);
+          await writeMemberSavingsJournal({
+            memberAccountCode: code,
+            memberAccountName: `Member Savings — ${member.firstName} ${member.surname} (${member.memberNumber})`,
+            amount: withdrawal.amount,
+            direction: 'withdrawal',
+            date: new Date(),
+            description: `Savings withdrawal — ${member.firstName} ${member.surname} — ${withdrawal.period || 'override'}${paymentReference ? ` — Ref: ${paymentReference}` : ''}`,
+            sourceType: 'withdrawal_savings',
+            paymentMethod
+          });
+        } else {
+          console.warn(`[recordPayment] No account code for ${member.memberNumber} — savings journal skipped`);
+        }
+      } else if (withdrawal.source === 'dividends' && payAccount) {
+        // Dividends paid out: Debit 2000 Dividends Payable, Credit payment account
+        await writeJournal({
+          date: new Date(),
+          description: `Dividend withdrawal — ${member.firstName} ${member.surname}${paymentReference ? ` — Ref: ${paymentReference}` : ''}`,
+          sourceType: 'withdrawal_dividends',
+          lines: [
+            { accountCode: '2000', accountName: 'Dividends Payable', debit: withdrawal.amount, credit: 0 },
+            { accountCode: payAccount.code, accountName: payAccount.name, debit: 0, credit: withdrawal.amount }
+          ]
+        });
+      }
+    } catch (jErr) {
+      console.error('[recordPayment] Journal error:', jErr.message);
+    }
+
+    // ── Receipt (existing behavior) ──
     let receipt = null;
     try {
       let receiptNumber;

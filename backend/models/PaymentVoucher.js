@@ -12,12 +12,7 @@ const PaymentVoucherSchema = new mongoose.Schema({
   voucherNumber: { type: String, required: true, unique: true, index: true },
 
   // Which "side" — club or business
-  voucherFor: {
-    type: String,
-    enum: ['club', 'business'],
-    required: true,
-    index: true
-  },
+  voucherFor: { type: String, enum: ['club', 'business', 'loan'], default: 'club' },
   businessId: { type: mongoose.Schema.Types.ObjectId, ref: 'Business', default: null },
   businessName: { type: String, default: '' },
 

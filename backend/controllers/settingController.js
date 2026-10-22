@@ -7,7 +7,7 @@ exports.getSettings = async (req, res) => {
     let settings = await Setting.findOne();
     if (!settings) {
       settings = await Setting.create({
- processingFeeEmergency: 0,
+        processingFeeEmergency: 0,
         processingFeeSchoolFees: 0,
         processingFeeBusiness: 0,
         latePenaltyEmergency: 0,
@@ -68,8 +68,8 @@ exports.updateShareSettings = async (req, res) => {
       if (req.body.shareTypes) {
         settings.shareTypes = { ...settings.shareTypes, ...req.body.shareTypes };
       }
+
       if (req.body.dividendPercentages) {
-        // Validate: percentages must sum to 100
         const p = req.body.dividendPercentages;
         const total = (p.ordinary || 0) + (p.silver || 0) + (p.golden || 0) + (p.platinum || 0);
         if (Math.abs(total - 100) > 0.01) {
@@ -77,9 +77,19 @@ exports.updateShareSettings = async (req, res) => {
         }
         settings.dividendPercentages = { ...settings.dividendPercentages, ...p };
       }
+
       if (req.body.loanEligibility) {
         settings.loanEligibility = { ...settings.loanEligibility, ...req.body.loanEligibility };
       }
+
+      // NEW FIELDS — save them
+      if (req.body.loanProcessingFeePercent !== undefined) {
+        settings.loanProcessingFeePercent = Number(req.body.loanProcessingFeePercent) || 0;
+      }
+      if (req.body.constitutionFee !== undefined) {
+        settings.constitutionFee = Number(req.body.constitutionFee) || 0;
+      }
+
       if (req.body.updatedBy) settings.updatedBy = req.body.updatedBy;
       settings.updatedAt = new Date();
     }
@@ -90,7 +100,7 @@ exports.updateShareSettings = async (req, res) => {
   }
 };
 
-// ==================== PUBLIC ELIGIBILITY (used on loan form) ====================
+// ==================== PUBLIC ELIGIBILITY ====================
 exports.getLoanEligibilityText = async (req, res) => {
   try {
     const settings = await ShareSettings.findOne();

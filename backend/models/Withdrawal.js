@@ -20,11 +20,7 @@ const WithdrawalSchema = new mongoose.Schema({
   amount: { type: Number, required: true, min: 1 },
 
   // Withdrawal window it falls under
-  period: {
-    type: String,
-    enum: ['june', 'december'],
-    required: true
-  },
+  period: { type: String, enum: ['june', 'december', 'window1', 'window2', 'override'], default: null },
 
   requestedDate: { type: Date, default: Date.now, index: true },
   approvedDate: { type: Date, default: null },
@@ -39,12 +35,12 @@ const WithdrawalSchema = new mongoose.Schema({
 
   paymentMethod: {
     type: String,
-    enum: ['cash', 'mobile_money', ''],
+    enum: ['cash', 'bank', 'mobile_money', ''],
     default: ''
   },
-  paymentReference: { type: String, default: '' }, // mobile money txn code, etc.
+  paymentReference: { type: String, default: '' },
 
-  requestedBy: { type: String, default: 'member' }, // member | admin
+  requestedBy: { type: String, default: 'member' },
   approvedBy: { type: String, default: '' },
   paidBy: { type: String, default: '' },
   rejectedBy: { type: String, default: '' },

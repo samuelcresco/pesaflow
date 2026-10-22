@@ -35,16 +35,18 @@ router.delete('/products/:id', productController.deleteProduct);
 router.get('/:id/branding', brandingController.getBranding);
 router.put('/:id/branding', brandingController.updateBranding);
 
-// ==================== BUSINESSES (existing) ====================
+// ==================== CAPITAL & TRANSACTIONS (before /:id) ====================
+router.post('/allocate-capital', businessController.allocateCapital);
+router.post('/return-capital', businessController.returnCapital);
+router.post('/purchase-stock', businessController.purchaseStock);
+router.post('/record-transaction', businessController.recordTransaction);
+router.post('/extract-profit', businessController.extractProfit);
+
+// ==================== BUSINESSES ====================
 router.post('/', businessController.createBusiness);
 router.get('/', businessController.getAllBusinesses);
 router.get('/transactions', businessController.getTransactions);
 router.get('/:id', businessController.getBusinessById);
 router.delete('/:id', businessController.deleteBusiness);
-
-// Capital & transactions
-router.post('/allocate-capital', businessController.allocateCapital);
-router.post('/record-transaction', businessController.recordTransaction);
-router.post('/extract-profit', businessController.extractProfit);
 
 module.exports = router;

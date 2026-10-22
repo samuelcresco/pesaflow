@@ -12,6 +12,7 @@ const SettingSchema = new mongoose.Schema({
   latePenaltyEmergency: { type: Number, default: 0 },
   latePenaltySchoolFees: { type: Number, default: 0 },
   latePenaltyBusiness: { type: Number, default: 0 },
+loanProcessingFeePercent: { type: Number, default: 0 },
 
   // Duration Defaults
   emergencyDurationMonths: { type: Number, default: 1 },
@@ -28,6 +29,8 @@ const SettingSchema = new mongoose.Schema({
   monthlySavingsAmount: { type: Number, default: 0 },
   membershipFeeAmount: { type: Number, default: 0 },
   annualRenewalFee: { type: Number, default: 0 }  // NEW
+  ,
+  constitutionFee: { type: Number, default: 0 }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Setting', SettingSchema);

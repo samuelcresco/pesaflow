@@ -1,122 +1,360 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import PdfOptionsModal from '../../components/PdfOptionsModal';
-import { apiFetch } from '../api-client';
+import { apiFetch, API } from '../api-client';
 
 export default function MemberDashboard() {
-  const [scheduleModal, setScheduleModal] = useState(null);
   const router = useRouter();
   const [member, setMember] = useState(null);
   const [profile, setProfile] = useState(null);
   const [savings, setSavings] = useState(null);
   const [shares, setShares] = useState(null);
+  const [shareRequests, setShareRequests] = useState([]);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareForm, setShareForm] = useState({ shareType: 'golden', quantity: 1, paymentMethod: 'cash' });
+  const [sharing, setSharing] = useState(false);
+  const [shareMsg, setShareMsg] = useState('');
+  const [shareSettings, setShareSettings] = useState(null);
   const [pdfModal, setPdfModal] = useState(null);
   const [loans, setLoans] = useState([]);
-  const [dividends, setDividends] = useState({ dividends: [], total: 0 });
+  const [loanEligibility, setLoanEligibility] = useState(null);
+  const [showApplyModal, setShowApplyModal] = useState(false);
+  const [applyForm, setApplyForm] = useState({ type: 'emergency', amount: '', duration: 3, scheduleUnit: 'weekly', purpose: '' });
+  const [applying, setApplying] = useState(false);
+  const [applyMessage, setApplyMessage] = useState('');
+  const [dividends, setDividends] = useState({ history: [], total: 0 });
+  const [divSummary, setDivSummary] = useState(null);
+  const [divLoading, setDivLoading] = useState(true);
+  const [showDivAction, setShowDivAction] = useState(null);
+  const [divForm, setDivForm] = useState({ amount: '', shareType: 'golden', quantity: 1 });
+  const [divBusy, setDivBusy] = useState(false);
+  const [divMsg, setDivMsg] = useState('');
   const [withdrawals, setWithdrawals] = useState({ withdrawals: [], totalPaid: 0 });
-  const [certificates, setCertificates] = useState({ certificates: [], total: 0 });
   const [withdrawEligibility, setWithdrawEligibility] = useState(null);
-  const [withdrawForm, setWithdrawForm] = useState({ source: 'savings', amount: '', notes: '' });
+  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+  const [withdrawForm, setWithdrawForm] = useState({ amount: '', notes: '' });
+  const [withdrawBusy, setWithdrawBusy] = useState(false);
   const [withdrawMsg, setWithdrawMsg] = useState('');
+  const [savingRequests, setSavingRequests] = useState([]);
+  const [showDepositModal, setShowDepositModal] = useState(false);
+  const [depositForm, setDepositForm] = useState({ category: 'monthly', amount: '', note: '' });
+  const [depositBusy, setDepositBusy] = useState(false);
+  const [depositMsg, setDepositMsg] = useState('');
+  const [certificates, setCertificates] = useState({ certificates: [], total: 0 });
+  const [membershipStatus, setMembershipStatus] = useState(null);
   const [clubStats, setClubStats] = useState(null);
   const [leaders, setLeaders] = useState([]);
+  const [constitution, setConstitution] = useState(null);
+  const [constitutionRefreshing, setConstitutionRefreshing] = useState(false);
   const [tab, setTab] = useState('overview');
   const [loading, setLoading] = useState(true);
-  const [showApplyLoan, setShowApplyLoan] = useState(false);
-  const [loanForm, setLoanForm] = useState({
-    type: 'emergency', amount: '', duration: 1, scheduleUnit: 'weekly', purpose: ''
-  });
 
   useEffect(() => {
     const data = localStorage.getItem('member');
-    if (!data) {
-      router.replace('/member-login');
-      return;
-    }
+    if (!data) { router.replace('/member-login'); return; }
     const m = JSON.parse(data);
     setMember(m);
     fetchAll(m.id);
   }, [router]);
 
+  useEffect(() => {
+    if (!member) return;
+    const t = setInterval(() => {
+      apiFetch('/api/member/club-stats').then(r => r.json()).then(d => setClubStats(d)).catch(() => {});
+    }, 30000);
+    return () => clearInterval(t);
+  }, [member]);
+
+  useEffect(() => {
+    if (!member) return;
+    const refresh = () => {
+      apiFetch(`/api/member/constitution/status?memberId=${member.id}&_t=${Date.now()}`)
+        .then(r => r.json()).then(d => setConstitution(d)).catch(() => {});
+    };
+    refresh();
+    const t = setInterval(refresh, 15000);
+    const vis = () => { if (document.visibilityState === 'visible') refresh(); };
+    document.addEventListener('visibilitychange', vis);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', vis); };
+  }, [member]);
+
   const fetchAll = async (id) => {
     try {
-      const safe = (url) => apiFetch(url)
-        .then(r => r.json())
-        .catch((e) => { console.error('Fetch failed:', url, e); return null; });
-
-      const [p, s, sh, l, d, w, cert, c, lead] = await Promise.all([
+      const safe = (url) => apiFetch(url).then(r => r.json()).catch(() => null);
+      const [p, s, sh, req, sett, l, dsum, dhist, w, elig, sr, cert, c, lead, loanEl, con, mstatusResp] = await Promise.all([
         safe(`/api/member/me/${id}`),
         safe(`/api/member/me/${id}/savings`),
         safe(`/api/member/me/${id}/shares`),
+        safe(`/api/share-requests/member/${id}`),
+        safe('/api/settings/shares'),
         safe(`/api/member/me/${id}/loans`),
-        safe(`/api/member/me/${id}/dividends`),
+        safe(`/api/member/me/${id}/dividend-summary`),
+        safe(`/api/member/me/${id}/dividend-history`),
         safe(`/api/withdrawals/member/${id}`),
+        safe(`/api/withdrawals/eligibility/${id}?source=savings`),
+        safe(`/api/member/me/${id}/saving-requests`),
         safe(`/api/share-certificates/member/${id}`),
         safe('/api/member/club-stats'),
-        safe('/api/member/leaders')
+        safe('/api/member/leaders'),
+        safe(`/api/loans/eligibility/${id}/emergency`),
+        safe(`/api/member/constitution/status?memberId=${id}&_t=${Date.now()}`),
+        safe(`/api/membership/members-status?year=${new Date().getFullYear()}`)
       ]);
-
       setProfile(p);
       setSavings(s);
       setShares(sh);
+      setShareRequests(Array.isArray(req) ? req : []);
+      setShareSettings(sett);
       setLoans(Array.isArray(l) ? l : []);
-      setDividends(d || { dividends: [], total: 0 });
+      setDivSummary(dsum);
+      setDividends(dhist || { history: [], total: 0 });
       setWithdrawals(w || { withdrawals: [], totalPaid: 0 });
+      setWithdrawEligibility(elig);
+      setSavingRequests(Array.isArray(sr) ? sr : []);
       setCertificates(cert || { certificates: [], total: 0 });
       setClubStats(c);
       setLeaders(Array.isArray(lead) ? lead : []);
+      setLoanEligibility(loanEl);
+      setConstitution(con);
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); setDivLoading(false); }
+  };
+
+  const refreshShares = async () => {
+    if (!member) return;
+    const [sh, req] = await Promise.all([
+      apiFetch(`/api/member/me/${member.id}/shares`).then(r => r.json()).catch(() => null),
+      apiFetch(`/api/share-requests/member/${member.id}`).then(r => r.json()).catch(() => [])
+    ]);
+    setShares(sh);
+    setShareRequests(Array.isArray(req) ? req : []);
+  };
+
+  const refreshDividends = async () => {
+    if (!member) return;
+    const [dsum, dhist] = await Promise.all([
+      apiFetch(`/api/member/me/${member.id}/dividend-summary`).then(r => r.json()).catch(() => null),
+      apiFetch(`/api/member/me/${member.id}/dividend-history`).then(r => r.json()).catch(() => ({ history: [], total: 0 }))
+    ]);
+    setDivSummary(dsum);
+    setDividends(dhist || { history: [], total: 0 });
+  };
+
+  const refreshLoans = async () => {
+    if (!member) return;
+    const [l, elig] = await Promise.all([
+      apiFetch(`/api/member/me/${member.id}/loans`).then(r => r.json()).catch(() => []),
+      apiFetch(`/api/loans/eligibility/${member.id}/emergency`).then(r => r.json()).catch(() => null)
+    ]);
+    setLoans(Array.isArray(l) ? l : []);
+    setLoanEligibility(elig);
+  };
+
+  const refreshWithdraw = async () => {
+    if (!member) return;
+    const [w, elig] = await Promise.all([
+      apiFetch(`/api/withdrawals/member/${member.id}`).then(r => r.json()).catch(() => ({ withdrawals: [], totalPaid: 0 })),
+      apiFetch(`/api/withdrawals/eligibility/${member.id}?source=savings`).then(r => r.json()).catch(() => null)
+    ]);
+    setWithdrawals(w || { withdrawals: [], totalPaid: 0 });
+    setWithdrawEligibility(elig);
+  };
+
+  const refreshSavingRequests = async () => {
+    if (!member) return;
+    const sr = await apiFetch(`/api/member/me/${member.id}/saving-requests`).then(r => r.json()).catch(() => []);
+    setSavingRequests(Array.isArray(sr) ? sr : []);
+  };
+
+  const refreshClubStats = async () => {
+    try {
+      const r = await apiFetch(`/api/member/club-stats?_t=${Date.now()}`);
+      setClubStats(await r.json());
+    } catch {}
+  };
+
+  const refreshConstitution = useCallback(async () => {
+    if (!member) return;
+    setConstitutionRefreshing(true);
+    try {
+      const r = await apiFetch(`/api/member/constitution/status?memberId=${member.id}&_t=${Date.now()}`);
+      setConstitution(await r.json());
+    } catch {}
+    finally { setTimeout(() => setConstitutionRefreshing(false), 300); }
+  }, [member]);
+
+  const openDivAction = (action) => {
+    setShowDivAction(action);
+    setDivMsg('');
+    const bal = divSummary?.dividendBalance || 0;
+    setDivForm({ amount: String(bal), shareType: 'golden', quantity: 1 });
+  };
+
+  const submitDivAction = async (e) => {
+    e.preventDefault();
+    setDivMsg('');
+    const action = showDivAction;
+    if (!action) return;
+
+    let body = { action };
+    if (action === 'withdraw' || action === 'to_savings' || action === 'donate') {
+      const amt = Number(divForm.amount) || 0;
+      if (amt <= 0) { setDivMsg('❌ Enter a valid amount'); return; }
+      body.amount = amt;
+    } else if (action === 'to_shares') {
+      const qty = parseInt(divForm.quantity) || 0;
+      if (qty <= 0) { setDivMsg('❌ Enter a valid quantity'); return; }
+      body.shareType = divForm.shareType;
+      body.quantity = qty;
+    }
+
+    setDivBusy(true);
+    try {
+      const res = await apiFetch(`/api/member/me/${member.id}/use-dividends`, {
+        method: 'POST',
+        body: JSON.stringify(body)
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Failed');
+      setDivMsg('✅ ' + d.message);
+      setTimeout(async () => {
+        setShowDivAction(null);
+        setDivMsg('');
+        await Promise.all([refreshDividends(), refreshShares()]);
+      }, 2000);
     } catch (err) {
-      console.error('fetchAll error:', err);
+      setDivMsg('❌ ' + err.message);
     } finally {
-      setLoading(false);
+      setDivBusy(false);
     }
   };
 
-  useEffect(() => {
-    if (member && tab === 'withdraw' && savings) {
-      apiFetch(`/api/withdrawals/eligibility/${member.id}?source=${withdrawForm.source}&amount=0`)
-        .then(r => r.json())
-        .then(d => setWithdrawEligibility(d))
-        .catch(() => {});
-    }
-  }, [tab, withdrawForm.source, member, savings]);
-
-  const handleApplyLoan = async (e) => {
+  const submitShareApplication = async (e) => {
     e.preventDefault();
+    setShareMsg('');
+    const qty = parseInt(shareForm.quantity) || 0;
+    if (qty <= 0) { setShareMsg('❌ Quantity must be greater than 0'); return; }
+
+    setSharing(true);
+    try {
+      const res = await apiFetch(`/api/share-requests/member/${member.id}/apply`, {
+        method: 'POST',
+        body: JSON.stringify({
+          shareType: shareForm.shareType,
+          quantity: qty,
+          paymentMethod: shareForm.paymentMethod
+        })
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Failed');
+      setShareMsg('✅ Share request submitted! Awaiting admin approval.');
+      setTimeout(async () => {
+        setShowShareModal(false);
+        setShareForm({ shareType: 'golden', quantity: 1, paymentMethod: 'cash' });
+        setShareMsg('');
+        await refreshShares();
+      }, 2200);
+    } catch (err) {
+      setShareMsg('❌ ' + err.message);
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  const submitLoanApplication = async (e) => {
+    e.preventDefault();
+    setApplyMessage('');
+    const limit = loanEligibility?.maxAmount || 0;
+    const amt = Number(applyForm.amount) || 0;
+    if (loanEligibility?.hasActiveLoan) { setApplyMessage('❌ You already have an active loan'); return; }
+    if (amt <= 0) { setApplyMessage('❌ Enter a valid amount'); return; }
+    if (amt > limit) { setApplyMessage(`❌ Amount exceeds your limit of UGX ${limit.toLocaleString()}`); return; }
+
+    setApplying(true);
     try {
       const res = await apiFetch(`/api/member/me/${member.id}/apply-loan`, {
         method: 'POST',
         body: JSON.stringify({
-          type: loanForm.type,
-          amount: parseFloat(loanForm.amount),
-          duration: parseInt(loanForm.duration),
-          scheduleUnit: loanForm.scheduleUnit,
-          purpose: loanForm.purpose
+          type: applyForm.type, amount: amt,
+          duration: Number(applyForm.duration) || 1,
+          scheduleUnit: applyForm.scheduleUnit,
+          purpose: applyForm.purpose
         })
       });
-      const data = await res.json();
-      if (res.ok) {
-        alert('Loan application submitted!');
-        setShowApplyLoan(false);
-        setLoanForm({ type: 'emergency', amount: '', duration: 1, scheduleUnit: 'weekly', purpose: '' });
-        fetchAll(member.id);
-      } else {
-        alert(data.error);
-      }
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Application failed');
+      setApplyMessage('✅ Loan application submitted! Awaiting admin approval.');
+      setTimeout(async () => {
+        setShowApplyModal(false);
+        setApplyForm({ type: 'emergency', amount: '', duration: 3, scheduleUnit: 'weekly', purpose: '' });
+        setApplyMessage('');
+        await refreshLoans();
+      }, 2200);
     } catch (err) {
-      alert('Network error');
+      setApplyMessage('❌ ' + err.message);
+    } finally { setApplying(false); }
+  };
+
+  const submitDepositRequest = async (e) => {
+    e.preventDefault();
+    setDepositMsg('');
+    const amt = Number(depositForm.amount) || 0;
+    if (amt <= 0) { setDepositMsg('❌ Enter a valid amount'); return; }
+
+    setDepositBusy(true);
+    try {
+      const res = await apiFetch(`/api/member/me/${member.id}/saving-request`, {
+        method: 'POST',
+        body: JSON.stringify({
+          category: depositForm.category,
+          amount: amt,
+          note: depositForm.note
+        })
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Failed');
+      setDepositMsg('✅ Deposit request submitted! Awaiting admin approval.');
+      setTimeout(async () => {
+        setShowDepositModal(false);
+        setDepositForm({ category: 'monthly', amount: '', note: '' });
+        setDepositMsg('');
+        await refreshSavingRequests();
+      }, 2200);
+    } catch (err) {
+      setDepositMsg('❌ ' + err.message);
+    } finally {
+      setDepositBusy(false);
     }
   };
 
-  const viewSchedule = async (loanId) => {
+  const submitWithdrawRequest = async (e) => {
+    e.preventDefault();
+    setWithdrawMsg('');
+    const amt = Number(withdrawForm.amount) || 0;
+    if (amt <= 0) { setWithdrawMsg('❌ Enter a valid amount'); return; }
+
+    setWithdrawBusy(true);
     try {
-      const res = await apiFetch(`/api/loans/${loanId}/schedule`);
-      const data = await res.json();
-      if (res.ok) setScheduleModal(data);
-      else alert(data.error);
-    } catch (err) { alert('Network error'); }
+      const res = await apiFetch(`/api/member/me/${member.id}/withdraw-request`, {
+        method: 'POST',
+        body: JSON.stringify({ amount: amt, notes: withdrawForm.notes })
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Failed');
+      setWithdrawMsg('✅ ' + d.message);
+      setTimeout(async () => {
+        setShowWithdrawModal(false);
+        setWithdrawForm({ amount: '', notes: '' });
+        setWithdrawMsg('');
+        await refreshWithdraw();
+      }, 2400);
+    } catch (err) {
+      setWithdrawMsg('❌ ' + err.message);
+    } finally {
+      setWithdrawBusy(false);
+    }
   };
 
   const logout = () => {
@@ -128,62 +366,95 @@ export default function MemberDashboard() {
   if (loading) return <div style={{ padding: '40px' }}>Loading...</div>;
   if (!member) return null;
 
+  const totalBorrowed = loans.reduce((s, l) => s + Number(l.amount || 0), 0);
+  const totalPaid = loans.reduce((s, l) => s + Number(l.paidAmount || 0), 0);
+  const totalOutstanding = loans.reduce((s, l) => s + Number(l.outstandingBalance || 0), 0);
+  const activeLoan = loans.find(l => ['disbursed', 'active'].includes(l.status));
+  const activeOutstanding = activeLoan ? Number(activeLoan.outstandingBalance || 0) : 0;
+
+  const sharePrices = shareSettings?.shareTypes || {};
+  const shareTypesList = [
+    { key: 'platinum', label: 'Platinum', color: '#e6b800', bg: '#fef9e7', setKey: 'platinum' },
+    { key: 'golden',   label: 'Golden',   color: '#b8860b', bg: '#fef3c7', setKey: 'golden'   },
+    { key: 'silver',   label: 'Silver',   color: '#64748b', bg: '#f1f5f9', setKey: 'silver'   },
+    { key: 'bronze',   label: 'Ordinary', color: '#c2410c', bg: '#ffedd5', setKey: 'ordinary' }
+  ];
+  const totalShareQty = shareTypesList.reduce((s, t) => s + Number(shares?.shares?.[t.key]?.quantity || 0), 0);
+
   const tabs = [
     { id: 'overview', label: '🏠 Overview' },
     { id: 'profile', label: '👤 Profile' },
     { id: 'savings', label: '💰 Savings' },
     { id: 'shares', label: '📊 Shares' },
     { id: 'certificates', label: '📜 Certificates' },
-    { id: 'loans', label: '🏦 Loan History' },
+    { id: 'loans', label: '🏦 Loans' },
     { id: 'dividends', label: '💵 Dividends' },
     { id: 'withdraw', label: '💸 Withdraw' },
     { id: 'club', label: '🏛️ Club Stats' },
+    { id: 'constitution', label: '📖 Constitution' },
     { id: 'contacts', label: '📞 Contacts' },
     { id: 'password', label: '🔒 Password' }
   ];
 
+  const savingsPaid = withdrawals.withdrawals.filter(w => w.source === 'savings' && w.status === 'paid');
+  const savingsTotalPaid = savingsPaid.reduce((s, w) => s + Number(w.amount || 0), 0);
+  const savingsPending = withdrawals.withdrawals.filter(w => w.source === 'savings' && w.status === 'pending');
+  const savingsPendingTotal = savingsPending.reduce((s, w) => s + Number(w.amount || 0), 0);
+  const savingsWithdrawalsOnly = withdrawals.withdrawals.filter(w => w.source === 'savings');
+  const savingsAvailable = Math.max(0, Number(withdrawEligibility?.savings || 0) - Number(withdrawEligibility?.lockedSavings || 0));
+  const maxWithdrawable = Number(withdrawEligibility?.maxWithdrawable || 0);
+  const capPercent = Number(withdrawEligibility?.savingsCapPercent || 0);
+  const windowOpen = !!withdrawEligibility?.window?.ok;
+  const windowLabel = withdrawEligibility?.windowLabel || '—';
+
   return (
     <div style={{ padding: '24px', maxWidth: '1300px', margin: '0 auto', fontFamily: 'Segoe UI, sans-serif' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          {profile?.photo ? (
-            <img src={profile.photo} alt="Profile" style={{ width: '60px', height: '60px', borderRadius: '50%', objectFit: 'cover' }} />
-          ) : (
-            <div style={{ width: '60px', height: '60px', borderRadius: '50%', background: '#e0f2fe', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '28px' }}>👤</div>
-          )}
-          <div>
-            <h2 style={{ margin: 0 }}>Welcome, {member.name}!</h2>
-            <div style={{ color: '#64748b', fontSize: '14px' }}>Member No: <strong>{member.memberNumber}</strong></div>
-          </div>
+        <div>
+          <h2 style={{ margin: 0 }}>Welcome, {member.name}!</h2>
+          <div style={{ color: '#64748b', fontSize: '14px' }}>Member No: <strong>{member.memberNumber}</strong></div>
         </div>
-        <button onClick={logout} style={{ padding: '10px 20px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600' }}>
-          Logout
-        </button>
+        <button onClick={logout} style={{ padding: '10px 20px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600' }}>Logout</button>
       </div>
 
       <div style={{ display: 'flex', gap: '4px', borderBottom: '2px solid #e5e7eb', marginBottom: '24px', flexWrap: 'wrap' }}>
         {tabs.map(t => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            style={{
-              padding: '10px 16px', background: 'transparent', border: 'none',
-              borderBottom: tab === t.id ? '3px solid #2563eb' : '3px solid transparent',
-              color: tab === t.id ? '#1e293b' : '#64748b',
-              fontWeight: tab === t.id ? '600' : '500',
-              cursor: 'pointer', marginBottom: '-2px', fontSize: '14px'
-            }}
-          >{t.label}</button>
+          <button key={t.id} onClick={() => setTab(t.id)} style={{
+            padding: '10px 16px', background: 'transparent', border: 'none',
+            borderBottom: tab === t.id ? '3px solid #2563eb' : '3px solid transparent',
+            color: tab === t.id ? '#1e293b' : '#64748b',
+            fontWeight: tab === t.id ? '600' : '500',
+            cursor: 'pointer', marginBottom: '-2px', fontSize: '14px'
+          }}>{t.label}</button>
         ))}
       </div>
 
-      {tab === 'overview' && (
+          {tab === 'overview' && (
         <div>
           <h2>Overview</h2>
+
+          {/* Arrears alert — appears only if member owes any prior year */}
+          {membershipStatus?.arrearsTotal > 0 && (
+            <div style={{
+              background: '#fee2e2',
+              border: '1px solid #fca5a5',
+              padding: '14px 18px',
+              borderRadius: '10px',
+              marginBottom: '18px',
+              color: '#991b1b'
+            }}>
+              <div style={{ fontWeight: 700, marginBottom: '4px' }}>⚠️ Outstanding Membership Arrears</div>
+              <div style={{ fontSize: '13px' }}>
+                You owe <strong>UGX {Number(membershipStatus.arrearsTotal).toLocaleString()}</strong> for{' '}
+                <strong>{(membershipStatus.arrearsYears || []).join(', ')}</strong>. Please contact the club office.
+              </div>
+            </div>
+          )}
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
             <Card title="My Savings" value={savings?.totals?.total || 0} color="#15803d" bg="#dcfce7" icon="💰" />
             <Card title="My Shares" value={shares?.totalValue || 0} color="#7c3aed" bg="#f3e8ff" icon="📊" />
-            <Card title="Active Loans" value={loans.filter(l => l.status === 'active').length} color="#b45309" bg="#fef9e7" icon="🏦" raw />
+            <Card title="Dividends" value={divSummary?.dividendBalance || 0} color="#0891b2" bg="#cffafe" icon="💵" />
             <Card title="Certificates" value={(certificates?.certificates || []).filter(c => c.status === 'issued').length} color="#c9a227" bg="#fef9e7" icon="📜" raw />
           </div>
         </div>
@@ -198,572 +469,833 @@ export default function MemberDashboard() {
             <Info label="Member Number" value={profile.memberNumber} />
             <Info label="Contact" value={profile.contact} />
             <Info label="Email" value={profile.email} />
-            <Info label="Occupation" value={profile.occupation || '—'} />
             <Info label="Address" value={profile.address} />
-            <Info label="Date of Birth" value={new Date(profile.dateOfBirth).toLocaleDateString()} />
-            <Info label="Subscribed On" value={new Date(profile.dateOfSubscription).toLocaleDateString()} />
-          </div>
-          <h3 style={{ marginTop: '24px' }}>Next of Kin</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-            <Info label="Name" value={profile.nextOfKin?.fullName} />
-            <Info label="Relationship" value={profile.nextOfKin?.relationship} />
-            <Info label="Contact" value={profile.nextOfKin?.contact} />
-            <Info label="Email" value={profile.nextOfKin?.email || '—'} />
-            <Info label="Address" value={profile.nextOfKin?.address} />
           </div>
         </div>
       )}
 
+      {/* ==================== SAVINGS TAB ==================== */}
       {tab === 'savings' && savings && (
         <div>
-          <h2>My Savings</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+            <h2 style={{ margin: 0 }}>My Savings</h2>
+            <button onClick={() => { setShowDepositModal(true); setDepositMsg(''); }} style={{ padding: '8px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' }}>➕ Deposit Money</button>
+          </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '20px' }}>
-            <Card title="Monthly Savings" value={savings.totals.monthly} color="#0369a1" bg="#e0f2fe" />
-            <Card title="Extra Savings" value={savings.totals.extra} color="#15803d" bg="#dcfce7" />
-            <Card title="Total Savings" value={savings.totals.total} color="#7c3aed" bg="#f3e8ff" />
-            <Card title="Locked (Loan)" value={savings.totals.locked || 0} color="#dc2626" bg="#fee2e2" />
+            <Card title="Monthly" value={savings.totals?.monthly || 0} color="#0369a1" bg="#e0f2fe" />
+            <Card title="Extra" value={savings.totals?.extra || 0} color="#15803d" bg="#dcfce7" />
+            <Card title="Total" value={savings.totals?.total || 0} color="#7c3aed" bg="#f3e8ff" />
+            <Card title="Locked" value={savings.totals?.locked || 0} color="#dc2626" bg="#fee2e2" />
           </div>
-          <div style={{ marginBottom: '20px' }}>
-            <button onClick={() => setPdfModal({ title: 'My Savings Statement', url: `https://pesaflow-api-jpll.onrender.com/api/savings/member-statement/${member.id}` })} style={btn('#3b82f6')}>📄 Download Statement PDF</button>
-          </div>
-          <h3>Transaction History</h3>
-          <table style={table}>
-            <thead><tr style={thead}><th style={th}>Date</th><th style={th}>Category</th><th style={th}>Amount</th></tr></thead>
-            <tbody>
-              {savings.savings.map(s => (
-                <tr key={s._id} style={tr}>
-                  <td style={td}>{new Date(s.date).toLocaleDateString()}</td>
-                  <td style={td}>{s.category}</td>
-                  <td style={td}>UGX {s.amount.toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+          <h3 style={{ fontSize: '15px', color: '#334155', marginBottom: '8px' }}>📥 My Deposit Requests</h3>
+          {savingRequests.length === 0 ? (
+            <p style={{ color: '#94a3b8', fontSize: '13px' }}>You have no deposit requests yet.</p>
+          ) : (
+            <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid #e5e7eb' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead><tr style={{ background: '#f8fafc' }}>
+                  <th style={thL}>Date</th><th style={thL}>Category</th><th style={thL}>Amount</th><th style={thL}>Status</th><th style={thL}>Note</th>
+                </tr></thead>
+                <tbody>
+                  {savingRequests.map(r => (
+                    <tr key={r._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={tdL}>{new Date(r.requestedAt).toLocaleDateString()}</td>
+                      <td style={{ ...tdL, textTransform: 'capitalize' }}>{r.category}</td>
+                      <td style={tdL}>UGX {Number(r.amount || 0).toLocaleString()}</td>
+                      <td style={tdL}>
+                        <span style={{
+                          padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600,
+                          background: r.status === 'approved' ? '#dcfce7' : r.status === 'rejected' ? '#fee2e2' : '#fef9e7',
+                          color: r.status === 'approved' ? '#065f46' : r.status === 'rejected' ? '#991b1b' : '#b45309'
+                        }}>{r.status.toUpperCase()}</span>
+                        {r.status === 'rejected' && r.rejectedReason && (
+                          <div style={{ fontSize: '11px', color: '#991b1b', marginTop: '3px' }}>{r.rejectedReason}</div>
+                        )}
+                      </td>
+                      <td style={{ ...tdL, color: '#64748b' }}>{r.note || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
-      {tab === 'shares' && shares && (
+      {tab === 'shares' && (
         <div>
-          <h2>My Shares</h2>
-          <table style={table}>
-            <thead><tr style={thead}><th style={th}>Type</th><th style={th}>Quantity</th><th style={th}>Price</th><th style={th}>Value</th></tr></thead>
-            <tbody>
-              {Object.entries(shares.shares).map(([type, s]) => (
-                <tr key={type} style={tr}>
-                  <td style={{ ...td, textTransform: 'capitalize' }}>{type}</td>
-                  <td style={td}>{s.quantity}</td>
-                  <td style={td}>UGX {s.price.toLocaleString()}</td>
-                  <td style={td}>UGX {s.value.toLocaleString()}</td>
-                </tr>
-              ))}
-              <tr style={{ ...tr, fontWeight: '700', background: '#f1f5f9' }}>
-                <td style={td}>Total</td>
-                <td style={td}>{shares.totalQuantity}</td>
-                <td style={td}>—</td>
-                <td style={td}>UGX {shares.totalValue.toLocaleString()}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+            <h2 style={{ margin: 0 }}>📊 My Shares</h2>
+            <button onClick={() => setShowShareModal(true)} style={{ padding: '8px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' }}>➕ Apply for Shares</button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+            {shareTypesList.map(t => {
+              const owned = Number(shares?.shares?.[t.key]?.quantity || 0);
+              const price = Number(sharePrices?.[t.setKey]?.price || 0);
+              const maxShares = Number(sharePrices?.[t.setKey]?.maxShares || 15);
+              const value = owned * price;
+              return (
+                <div key={t.key} style={{ background: t.bg, borderRadius: '12px', padding: '16px', border: `1px solid ${t.color}40` }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: t.color, textTransform: 'uppercase' }}>{t.label}</div>
+                    <div style={{ fontSize: '11px', color: '#64748b' }}>UGX {price.toLocaleString()} each</div>
+                  </div>
+                  <div style={{ fontSize: '28px', fontWeight: 800, color: t.color, lineHeight: 1 }}>
+                    {owned}<span style={{ fontSize: '16px', color: '#94a3b8', fontWeight: 500 }}> / {maxShares}</span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#475569', marginTop: '6px' }}>Value: <strong>UGX {value.toLocaleString()}</strong></div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ background: '#0f3460', color: '#fff', padding: '18px 22px', borderRadius: '12px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+            <div>
+              <div style={{ fontSize: '12px', opacity: 0.75 }}>Total Shares</div>
+              <div style={{ fontSize: '26px', fontWeight: 800 }}>{totalShareQty} <span style={{ fontSize: '16px', opacity: 0.6 }}>/ 15</span></div>
+            </div>
+            <div>
+              <div style={{ fontSize: '12px', opacity: 0.75 }}>Total Value</div>
+              <div style={{ fontSize: '26px', fontWeight: 800 }}>UGX {Number(shares?.totalValue || 0).toLocaleString()}</div>
+            </div>
+          </div>
+
+          <h3 style={{ fontSize: '15px', color: '#334155', marginBottom: '8px' }}>My Share Requests</h3>
+          {shareRequests.length === 0 ? (
+            <p style={{ color: '#94a3b8', fontSize: '13px' }}>You have no share requests yet.</p>
+          ) : (
+            <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid #e5e7eb' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead><tr style={{ background: '#f8fafc' }}>
+                  <th style={thL}>Type</th><th style={thL}>Qty</th><th style={thL}>Amount</th><th style={thL}>Method</th><th style={thL}>Status</th><th style={thL}>Date</th>
+                </tr></thead>
+                <tbody>
+                  {shareRequests.map(r => (
+                    <tr key={r._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={tdL}>{r.shareType}</td><td style={tdL}>{r.quantity}</td>
+                      <td style={tdL}>UGX {Number(r.amountDue || 0).toLocaleString()}</td>
+                      <td style={tdL}>{r.paymentMethod}</td>
+                      <td style={tdL}><span style={{
+                        padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600,
+                        background: r.status === 'approved' ? '#dcfce7' : r.status === 'rejected' ? '#fee2e2' : '#fef9e7',
+                        color: r.status === 'approved' ? '#065f46' : r.status === 'rejected' ? '#991b1b' : '#b45309'
+                      }}>{r.status.toUpperCase()}</span></td>
+                      <td style={tdL}>{new Date(r.requestedAt).toLocaleDateString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
       {tab === 'certificates' && (
         <div>
           <h2>📜 My Share Certificates</h2>
-          <p style={{ color: '#64748b', fontSize: '13px', marginBottom: '16px' }}>
-            Certificates issued by the club certifying the shares you own. Download or print as proof of ownership.
-          </p>
-
           {(certificates?.certificates || []).length === 0 ? (
-            <div style={{ padding: '30px', textAlign: 'center', background: '#f8fafc', borderRadius: '12px', border: '1px dashed #cbd5e1' }}>
+            <div style={{ padding: '40px', textAlign: 'center', background: '#f8fafc', borderRadius: '12px', border: '1px dashed #cbd5e1' }}>
               <div style={{ fontSize: '40px', marginBottom: '8px' }}>📜</div>
               <p style={{ color: '#64748b', margin: 0 }}>No certificates issued yet.</p>
-              <p style={{ color: '#94a3b8', margin: '6px 0 0 0', fontSize: '12px' }}>Contact the club office if you need a certificate for your shares.</p>
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '14px' }}>
-              {certificates.certificates.map(c => (
-                <div key={c._id} style={{ background: '#fff', border: '1px solid #c9a227', borderRadius: '12px', padding: '18px', position: 'relative', overflow: 'hidden' }}>
-                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '5px', background: 'linear-gradient(90deg, #0f3460, #c9a227, #0f3460)' }} />
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-                    <div>
-                      <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: '600', letterSpacing: '1px' }}>CERTIFICATE NO.</div>
-                      <div style={{ fontSize: '14px', fontWeight: '700', color: '#0f3460' }}>{c.certificateNumber}</div>
-                    </div>
-                    <span style={{
-                      padding: '3px 10px', borderRadius: '12px', fontSize: '10px', fontWeight: '600',
-                      background: c.status === 'issued' ? '#dcfce7' : '#fee2e2',
-                      color: c.status === 'issued' ? '#065f46' : '#991b1b'
-                    }}>{c.status.toUpperCase()}</span>
-                  </div>
-
-                  <div style={{ fontSize: '20px', fontWeight: '700', color: '#c9a227', marginBottom: '4px' }}>
-                    {c.totalQuantity} Shares
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '14px' }}>
-                    Total value: <strong style={{ color: '#0f3460' }}>UGX {Number(c.totalValue || 0).toLocaleString()}</strong>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', marginBottom: '14px' }}>
-                    {['golden', 'platinum', 'silver', 'bronze'].map(t => {
-                      const data = c.shares?.[t] || { qty: 0 };
-                      return (
-                        <div key={t} style={{ background: '#f8fafc', padding: '6px', borderRadius: '6px', textAlign: 'center' }}>
-                          <div style={{ fontSize: '9px', color: '#64748b', textTransform: 'uppercase' }}>{t}</div>
-                          <div style={{ fontSize: '14px', fontWeight: '700', color: '#1e293b' }}>{data.qty || 0}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '12px' }}>
-                    Issued: {new Date(c.issueDate).toLocaleDateString('en-GB')}
-                  </div>
-
-                  {c.status === 'issued' ? (
-                    <a
-                      href={`https://pesaflow-api-jpll.onrender.com/api/share-certificates/${c._id}/pdf`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ display: 'block', textAlign: 'center', padding: '10px', background: '#0f3460', color: '#fff', borderRadius: '8px', textDecoration: 'none', fontWeight: '600', fontSize: '13px' }}
-                    >📄 Download Certificate PDF</a>
-                  ) : (
-                    <div style={{ textAlign: 'center', padding: '10px', background: '#fee2e2', color: '#991b1b', borderRadius: '8px', fontWeight: '600', fontSize: '12px' }}>
-                      Certificate Cancelled
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {tab === 'loans' && (
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <h2>My Loan History</h2>
-            <button onClick={() => setShowApplyLoan(true)} style={btn('#2563eb')}>➕ Apply for Loan</button>
-          </div>
-
-          {loans.length === 0 ? <p>No loans yet.</p> : (
-            <>
-              {loans.filter(l => ['disbursed', 'active'].includes(l.status)).map(loan => {
-                const paid = Number(loan.paidAmount || 0);
-                const total = Number(loan.totalRepayable || 0);
-                const progress = total > 0 ? Math.min(100, Math.round((paid / total) * 100)) : 0;
+              {certificates.certificates.map(c => {
+                const isCancelled = c.status === 'cancelled';
                 return (
-                  <div key={loan._id} style={{ background: 'linear-gradient(135deg, #0f3460, #1e40af)', color: '#fff', padding: '20px', borderRadius: '14px', marginBottom: '16px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ fontSize: '12px', opacity: 0.85 }}>💼 ACTIVE LOAN</div>
-                      <div style={{ fontSize: '11px', opacity: 0.75, textTransform: 'capitalize' }}>{loan.type.replace('_', ' ')}</div>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginTop: '10px' }}>
+                  <div key={c._id} style={{ background: isCancelled ? '#fef2f2' : '#fff', border: `2px solid ${isCancelled ? '#fca5a5' : '#c9a227'}`, borderRadius: '12px', padding: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
                       <div>
-                        <div style={{ fontSize: '11px', opacity: 0.75 }}>Loan Amount</div>
-                        <div style={{ fontSize: '18px', fontWeight: '700' }}>UGX {Number(loan.amount || 0).toLocaleString()}</div>
+                        <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase' }}>Certificate</div>
+                        <div style={{ fontSize: '15px', fontWeight: 700, color: '#0f3460', fontFamily: 'monospace' }}>{c.certificateNumber}</div>
                       </div>
-                      <div>
-                        <div style={{ fontSize: '11px', opacity: 0.75 }}>Outstanding</div>
-                        <div style={{ fontSize: '18px', fontWeight: '700', color: '#fbbf24' }}>UGX {Number(loan.outstandingBalance || 0).toLocaleString()}</div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '11px', opacity: 0.75 }}>Paid So Far</div>
-                        <div style={{ fontSize: '18px', fontWeight: '700', color: '#86efac' }}>UGX {paid.toLocaleString()}</div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '11px', opacity: 0.75 }}>Total Repayable</div>
-                        <div style={{ fontSize: '18px', fontWeight: '700' }}>UGX {total.toLocaleString()}</div>
-                      </div>
+                      <span style={{ padding: '4px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: 700, background: isCancelled ? '#fee2e2' : '#dcfce7', color: isCancelled ? '#991b1b' : '#065f46' }}>
+                        {isCancelled ? '❌ CANCELLED' : '✅ ACTIVE'}
+                      </span>
                     </div>
-
-                    <div style={{ marginTop: '14px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', opacity: 0.85, marginBottom: '4px' }}>
-                        <span>Repayment Progress</span>
-                        <span>{progress}%</span>
+                    <div style={{ fontSize: '13px', color: '#334155', marginBottom: '10px' }}>
+                      <div><strong>Shares:</strong> {c.totalQuantity}</div>
+                      <div><strong>Value:</strong> UGX {Number(c.totalValue || 0).toLocaleString()}</div>
+                      <div><strong>Issued:</strong> {new Date(c.issueDate).toLocaleDateString()}</div>
+                    </div>
+                    {isCancelled && (
+                      <div style={{ background: '#fee2e2', color: '#991b1b', padding: '10px', borderRadius: '8px', fontSize: '12px', marginBottom: '10px' }}>
+                        <div style={{ fontWeight: 700, marginBottom: '3px' }}>⚠️ Certificate Cancelled</div>
+                        <div><strong>Reason:</strong> {c.cancelledReason || '—'}</div>
+                        {c.cancelledAt && <div><strong>Date:</strong> {new Date(c.cancelledAt).toLocaleDateString()}</div>}
                       </div>
-                      <div style={{ height: '8px', background: 'rgba(255,255,255,0.15)', borderRadius: '4px', overflow: 'hidden' }}>
-                        <div style={{ width: `${progress}%`, height: '100%', background: '#86efac', borderRadius: '4px', transition: 'width 0.3s' }} />
-                      </div>
-                    </div>
-
-                    <div style={{ marginTop: '12px', fontSize: '12px', opacity: 0.85 }}>
-                      Interest: {loan.interestRate}% | Installments: {loan.paidInstallments || 0}/{loan.totalInstallments || 0} paid
-                    </div>
-
-                    <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                      <button onClick={() => viewSchedule(loan._id)} style={{ background: '#fff', color: '#0f3460', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>📋 View Schedule</button>
-                      <button onClick={() => setPdfModal({ title: `Loan Statement — ${loan.type}`, url: `https://pesaflow-api-jpll.onrender.com/api/loans/${loan._id}/statement-pdf` })} style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>📄 Statement PDF</button>
-                      <button onClick={() => setPdfModal({ title: `Repayment Schedule — ${loan.type}`, url: `https://pesaflow-api-jpll.onrender.com/api/loans/${loan._id}/schedule-pdf` })} style={{ background: '#0891b2', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>📋 Schedule PDF</button>
-                    </div>
+                    )}
+                    {!isCancelled && (
+                      <button onClick={() => setPdfModal({ title: `Share Certificate — ${c.certificateNumber}`, url: `${API}/api/share-certificates/${c._id}/pdf` })} style={{ width: '100%', padding: '10px', background: '#0f3460', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}>
+                        📄 Download Certificate PDF
+                      </button>
+                    )}
                   </div>
                 );
               })}
-
-              {loans.filter(l => ['pending', 'approved'].includes(l.status)).length > 0 && (
-                <>
-                  <h3 style={{ marginTop: '24px' }}>Pending Applications</h3>
-                  {loans.filter(l => ['pending', 'approved'].includes(l.status)).map(loan => (
-                    <div key={loan._id} style={{ border: '1px solid #fcd34d', background: '#fef9e7', borderRadius: '12px', padding: '16px', marginBottom: '12px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <strong style={{ textTransform: 'capitalize' }}>{loan.type.replace('_', ' ')} — UGX {Number(loan.amount || 0).toLocaleString()}</strong>
-                        <span style={{ padding: '4px 10px', borderRadius: '20px', fontSize: '12px', background: '#fcd34d', color: '#78350f', fontWeight: '600' }}>{loan.status}</span>
-                      </div>
-                      <div style={{ marginTop: '8px', color: '#78350f', fontSize: '13px' }}>
-                        Interest: {loan.interestRate}% | Total repayable: UGX {Number(loan.totalRepayable || 0).toLocaleString()} | Applied: {new Date(loan.createdAt).toLocaleDateString()}
-                      </div>
-                    </div>
-                  ))}
-                </>
-              )}
-
-              <h3 style={{ marginTop: '24px' }}>Loan History</h3>
-              {loans.filter(l => !['disbursed', 'active', 'pending', 'approved'].includes(l.status)).length === 0 ? (
-                <p style={{ color: '#6b7280', fontSize: '13px' }}>No closed loans yet.</p>
-              ) : loans.filter(l => !['disbursed', 'active', 'pending', 'approved'].includes(l.status)).map(loan => (
-                <div key={loan._id} style={{ border: '1px solid #e5e7eb', borderRadius: '12px', padding: '16px', marginBottom: '12px', background: '#fafbfc' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <strong style={{ textTransform: 'capitalize' }}>{loan.type.replace('_', ' ')} — UGX {Number(loan.amount || 0).toLocaleString()}</strong>
-                    <span style={{
-                      padding: '4px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: '600',
-                      background: loan.status === 'closed' ? '#d1fae5' : loan.status === 'rejected' ? '#fee2e2' : '#f1f5f9',
-                      color: loan.status === 'closed' ? '#065f46' : loan.status === 'rejected' ? '#991b1b' : '#475569'
-                    }}>{loan.status}</span>
-                  </div>
-                  <div style={{ marginTop: '8px', color: '#64748b', fontSize: '13px' }}>
-                    Interest: {loan.interestRate}% | Total repayable: UGX {Number(loan.totalRepayable || 0).toLocaleString()}
-                    {loan.status === 'closed' && <span style={{ color: '#065f46', fontWeight: '600' }}> | ✅ Fully Repaid</span>}
-                  </div>
-                  <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    <button onClick={() => viewSchedule(loan._id)} style={btnMini('#3b82f6')}>📋 View Schedule</button>
-                    <button onClick={() => setPdfModal({ title: `Loan Statement — ${loan.type}`, url: `https://pesaflow-api-jpll.onrender.com/api/loans/${loan._id}/statement-pdf` })} style={btnMini('#7c3aed')}>📄 Statement</button>
-                  </div>
-                </div>
-              ))}
-            </>
+            </div>
           )}
         </div>
       )}
 
       {tab === 'dividends' && (
         <div>
-          <h2>My Dividends</h2>
-          <div style={{ background: '#dcfce7', padding: '18px', borderRadius: '12px', marginBottom: '20px' }}>
-            <div style={{ fontSize: '14px', color: '#15803d' }}>Total Dividends Received</div>
-            <div style={{ fontSize: '28px', fontWeight: '700', color: '#15803d' }}>UGX {(dividends?.total || 0).toLocaleString()}</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+            <h2 style={{ margin: 0 }}>💵 My Dividends</h2>
+            <button onClick={refreshDividends} style={{ padding: '8px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' }}>🔄 Refresh</button>
           </div>
-          {(dividends?.dividends || []).length === 0 ? <p>No dividends yet.</p> : (
-            <table style={table}>
-              <thead><tr style={thead}><th style={th}>Date</th><th style={th}>Amount</th></tr></thead>
-              <tbody>
-                {dividends.dividends.map((d, i) => (
-                  <tr key={i} style={tr}>
-                    <td style={td}>{new Date(d.date).toLocaleDateString()}</td>
-                    <td style={td}>UGX {(d.amount || 0).toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+
+          {divLoading || !divSummary ? (
+            <p style={{ color: '#64748b' }}>Loading dividends…</p>
+          ) : (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+                <div style={{ background: 'linear-gradient(135deg, #0891b2 0%, #06b6d4 100%)', color: '#fff', padding: '20px 22px', borderRadius: '14px', boxShadow: '0 8px 20px rgba(8,145,178,0.25)' }}>
+                  <div style={{ fontSize: '12px', opacity: 0.85, textTransform: 'uppercase', letterSpacing: '1px' }}>💰 Dividend Balance</div>
+                  <div style={{ fontSize: '30px', fontWeight: 800, marginTop: '4px' }}>UGX {Number(divSummary.dividendBalance || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: '11px', opacity: 0.8, marginTop: '4px' }}>
+                    {divSummary.window?.open ? '🟢 Withdrawals open' : '🔴 Withdrawals closed'}
+                  </div>
+                </div>
+                <StatCard label="Total Received" value={divSummary.totalDividendsReceived} color="#15803d" bg="#dcfce7" />
+                <StatCard label="Total Withdrawn" value={divSummary.totalDividendsWithdrawn} color="#b45309" bg="#fef9e7" />
+                <StatCard label="My Savings" value={divSummary.savings} color="#0369a1" bg="#e0f2fe" />
+              </div>
+
+              <div style={{
+                background: divSummary.window?.open ? '#dcfce7' : '#fef9e7',
+                border: `1px solid ${divSummary.window?.open ? '#86efac' : '#fcd34d'}`,
+                padding: '12px 16px', borderRadius: '10px', marginBottom: '20px', fontSize: '13px',
+                color: divSummary.window?.open ? '#065f46' : '#78350f'
+              }}>
+                {divSummary.window?.open ? (
+                  <>✅ <strong>Dividend withdrawal window is OPEN.</strong> You can withdraw, buy shares, add to savings or donate.</>
+                ) : (
+                  <>🔒 <strong>Dividend withdrawal window is CLOSED.</strong> Open between: <strong>{divSummary.window?.label || '—'}</strong></>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '10px', marginBottom: '24px' }}>
+                <ActionBtn icon="💸" label="Withdraw to Cash" disabled={!divSummary.window?.open || divSummary.dividendBalance <= 0} onClick={() => openDivAction('withdraw')} color="#dc2626" />
+                <ActionBtn icon="📊" label="Buy More Shares" disabled={!divSummary.window?.open || divSummary.dividendBalance <= 0} onClick={() => openDivAction('to_shares')} color="#7c3aed" />
+                <ActionBtn icon="💰" label="Add to Savings" disabled={!divSummary.window?.open || divSummary.dividendBalance <= 0} onClick={() => openDivAction('to_savings')} color="#15803d" />
+                <ActionBtn icon="🏛️" label="Donate to Club" disabled={!divSummary.window?.open || divSummary.dividendBalance <= 0} onClick={() => openDivAction('donate')} color="#c9a227" />
+              </div>
+
+              <h3 style={{ fontSize: '15px', color: '#334155', marginBottom: '8px' }}>📊 This Year's Distribution Breakdown</h3>
+              {divSummary.referencePool > 0 ? (
+                <>
+                  <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px' }}>
+                    Based on last distribution pool of <strong>UGX {Number(divSummary.referencePool).toLocaleString()}</strong>
+                    {divSummary.lastDistributionDate && ` on ${new Date(divSummary.lastDistributionDate).toLocaleDateString()}`}
+                  </div>
+                  <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid #e5e7eb', marginBottom: '20px' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                      <thead>
+                        <tr style={{ background: '#0f3460', color: '#fff' }}>
+                          <th style={thL}>Share Type</th>
+                          <th style={thL}>My Shares</th>
+                          <th style={thL}>Club Total</th>
+                          <th style={thL}>My %</th>
+                          <th style={thL}>Pool %</th>
+                          <th style={thL}>Pool Amount</th>
+                          <th style={thL}>My Dividend</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {divSummary.breakdown?.map(b => (
+                          <tr key={b.type} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                            <td style={{ ...tdL, textTransform: 'capitalize', fontWeight: 600 }}>{b.type === 'bronze' ? 'Ordinary' : b.type}</td>
+                            <td style={tdL}>{b.myShares}</td>
+                            <td style={tdL}>{b.clubShares}</td>
+                            <td style={tdL}>{b.myPercentOfType.toFixed(2)}%</td>
+                            <td style={tdL}>{b.poolPercent}%</td>
+                            <td style={tdL}>UGX {Number(b.poolAmount).toLocaleString()}</td>
+                            <td style={{ ...tdL, fontWeight: 700, color: '#0891b2' }}>UGX {Number(b.projectedDividend).toLocaleString()}</td>
+                          </tr>
+                        ))}
+                        <tr style={{ background: '#cffafe', fontWeight: 700 }}>
+                          <td style={tdL} colSpan={6}>TOTAL PROJECTED</td>
+                          <td style={{ ...tdL, color: '#0e7490' }}>UGX {Number(divSummary.totalProjected).toLocaleString()}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <p style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '20px' }}>No dividend distributions have been made yet.</p>
+              )}
+
+              <h3 style={{ fontSize: '15px', color: '#334155', marginBottom: '8px' }}>📜 My Distribution History</h3>
+              {(dividends?.history || []).length === 0 ? (
+                <p style={{ color: '#94a3b8', fontSize: '13px' }}>No distributions yet.</p>
+              ) : (
+                <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid #e5e7eb' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ background: '#f8fafc' }}>
+                        <th style={thL}>Date</th>
+                        <th style={thL}>From Platinum</th>
+                        <th style={thL}>From Golden</th>
+                        <th style={thL}>From Silver</th>
+                        <th style={thL}>From Ordinary</th>
+                        <th style={thL}>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dividends.history.map(h => (
+                        <tr key={h._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={tdL}>{new Date(h.date).toLocaleDateString()}</td>
+                          <td style={tdL}>UGX {Number(h.myShare.fromPlatinum).toLocaleString()}</td>
+                          <td style={tdL}>UGX {Number(h.myShare.fromGolden).toLocaleString()}</td>
+                          <td style={tdL}>UGX {Number(h.myShare.fromSilver).toLocaleString()}</td>
+                          <td style={tdL}>UGX {Number(h.myShare.fromBronze).toLocaleString()}</td>
+                          <td style={{ ...tdL, fontWeight: 700, color: '#0891b2' }}>UGX {Number(h.myShare.total).toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
 
+      {/* ==================== LOANS TAB ==================== */}
+      {tab === 'loans' && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+            <h2 style={{ margin: 0 }}>🏦 My Loans</h2>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <button onClick={refreshLoans} style={{ padding: '8px 16px', background: '#64748b', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' }}>🔄 Refresh</button>
+              <button onClick={() => setPdfModal({ title: `Full Loan Statement — ${member.memberNumber}`, url: `${API}/api/loans/member-loan-statement/${member.id}/pdf` })} style={{ padding: '8px 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' }}>📥 Full Statement</button>
+              {!loanEligibility?.hasActiveLoan && (
+                <button onClick={() => setShowApplyModal(true)} style={{ padding: '8px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' }}>➕ Apply for Loan</button>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '10px', marginBottom: '20px' }}>
+            <StatCard label="Available Loan Limit" value={loanEligibility?.maxAmount || 0} color="#16a34a" bg="#dcfce7" highlight />
+            <StatCard label="Active Loan Balance" value={activeOutstanding} color={activeOutstanding > 0 ? '#dc2626' : '#475569'} bg={activeOutstanding > 0 ? '#fee2e2' : '#f1f5f9'} />
+            <StatCard label="Total Borrowed" value={totalBorrowed} color="#0369a1" bg="#e0f2fe" />
+            <StatCard label="Total Repaid" value={totalPaid} color="#15803d" bg="#dcfce7" />
+            <StatCard label="Total Outstanding" value={totalOutstanding} color="#b45309" bg="#fef9e7" />
+          </div>
+
+          {loans.length === 0 ? (
+            <p style={{ color: '#94a3b8' }}>No loans yet.</p>
+          ) : (
+            <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid #e5e7eb' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead><tr style={{ background: '#0f3460', color: '#fff' }}>
+                  <th style={thL}>Type</th><th style={thL}>Amount</th><th style={thL}>Paid</th><th style={thL}>Outstanding</th><th style={thL}>Status</th><th style={thL}>Actions</th>
+                </tr></thead>
+                <tbody>
+                  {loans.map(l => (
+                    <tr key={l._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={tdL}>{String(l.type || '').replace('_', ' ')}</td>
+                      <td style={tdL}>UGX {Number(l.amount || 0).toLocaleString()}</td>
+                      <td style={{ ...tdL, color: '#15803d' }}>UGX {Number(l.paidAmount || 0).toLocaleString()}</td>
+                      <td style={{ ...tdL, color: Number(l.outstandingBalance) > 0 ? '#dc2626' : '#15803d' }}>UGX {Number(l.outstandingBalance || 0).toLocaleString()}</td>
+                      <td style={tdL}><span style={{ padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600, background: l.status === 'closed' ? '#dcfce7' : l.status === 'active' ? '#dbeafe' : '#fef9e7', color: l.status === 'closed' ? '#065f46' : l.status === 'active' ? '#1e40af' : '#b45309' }}>{String(l.status || '').toUpperCase()}</span></td>
+                      <td style={tdL}>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          <button onClick={() => setPdfModal({ title: `Schedule — ${l.type}`, url: `${API}/api/loans/repayment-schedule/${l._id}/pdf` })} style={btnMini('#2563eb')}>📄 Schedule</button>
+                          <button onClick={() => setPdfModal({ title: `Full Loan Statement — ${member.memberNumber}`, url: `${API}/api/loans/member-loan-statement/${member.id}/pdf` })} style={btnMini('#7c3aed')}>📥 Statement</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ==================== WITHDRAW TAB ==================== */}
       {tab === 'withdraw' && (
         <div>
-          <h2>💸 Withdraw Funds</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+            <h2 style={{ margin: 0 }}>💸 Withdraw Savings</h2>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <button onClick={refreshWithdraw} style={{ padding: '8px 16px', background: '#64748b', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' }}>🔄 Refresh</button>
+              <button onClick={() => setPdfModal({ title: `Withdrawal Statement — ${member.memberNumber}`, url: `${API}/api/member/me/${member.id}/withdrawals/pdf` })} style={{ padding: '8px 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' }}>📥 PDF Statement</button>
+              <button
+                onClick={() => { setShowWithdrawModal(true); setWithdrawMsg(''); setWithdrawForm({ amount: '', notes: '' }); }}
+                disabled={!windowOpen}
+                style={{ padding: '8px 16px', background: windowOpen ? '#dc2626' : '#94a3b8', color: '#fff', border: 'none', borderRadius: '8px', cursor: windowOpen ? 'pointer' : 'not-allowed', fontWeight: '600', fontSize: '13px' }}
+              >➕ Request Withdrawal</button>
+            </div>
+          </div>
 
+          {/* Cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+            <StatCard label="Available Savings" value={savingsAvailable} color="#0369a1" bg="#e0f2fe" highlight />
+            <StatCard label="Locked Savings" value={withdrawEligibility?.lockedSavings || 0} color="#dc2626" bg="#fee2e2" />
+            <StatCard label={`Max Withdrawable (${capPercent}%)`} value={maxWithdrawable} color="#16a34a" bg="#dcfce7" highlight />
+            <StatCard label="Total Withdrawn" value={savingsTotalPaid} color="#475569" bg="#f1f5f9" />
+            <StatCard label="Pending Requests" value={savingsPendingTotal} color="#b45309" bg="#fef9e7" />
+          </div>
+
+          {/* Window status */}
           <div style={{
-            background: withdrawEligibility?.window?.ok ? '#dcfce7' : '#fef9e7',
-            padding: '14px 18px', borderRadius: '10px', marginBottom: '20px',
-            color: withdrawEligibility?.window?.ok ? '#065f46' : '#b45309', fontWeight: '600'
+            background: windowOpen ? '#dcfce7' : '#fef9e7',
+            border: `1px solid ${windowOpen ? '#86efac' : '#fcd34d'}`,
+            padding: '14px 18px',
+            borderRadius: '10px',
+            marginBottom: '20px',
+            fontSize: '13px',
+            color: windowOpen ? '#065f46' : '#78350f'
           }}>
-            {!withdrawEligibility
-              ? '⏳ Loading window status...'
-              : withdrawEligibility.window.ok
-                ? `✅ Withdrawal window is OPEN (${withdrawEligibility.window.period})`
-                : '⏳ Withdrawal window is CLOSED — opens June 15–30 and December 15–30'}
+            {windowOpen ? (
+              <>✅ <strong>Withdrawal window is OPEN.</strong> You can request a withdrawal now.</>
+            ) : (
+              <>🔒 <strong>Withdrawal window is CLOSED.</strong> Open between: <strong>{windowLabel}</strong></>
+            )}
+            {withdrawEligibility?.hasActiveLoan && (
+              <div style={{ marginTop: '8px', fontWeight: 600 }}>
+                ⚠️ You have an active loan — savings withdrawals are blocked until it's cleared.
+              </div>
+            )}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '24px' }}>
-            <Card title="Savings" value={savings?.totals?.total || 0} color="#15803d" bg="#dcfce7" />
-            <Card title="Dividends Available" value={dividends?.total || 0} color="#7c3aed" bg="#f3e8ff" />
-            <Card title="Max from Savings (20%)" value={Math.floor((savings?.totals?.total || 0) * 0.2)} color="#b45309" bg="#fef9e7" />
-          </div>
-
-          {withdrawMsg && (
-            <div style={{
-              padding: '12px', borderRadius: '8px', marginBottom: '16px',
-              background: withdrawMsg.startsWith('✅') ? '#dcfce7' : '#fee2e2',
-              color: withdrawMsg.startsWith('✅') ? '#065f46' : '#991b1b', fontWeight: '600'
-            }}>{withdrawMsg}</div>
-          )}
-
-          <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', border: '1px solid #e5e7eb', marginBottom: '24px' }}>
-            <h3 style={{ marginTop: 0 }}>Submit a Withdrawal Request</h3>
-
-            <Field label="Withdraw From">
-              <select
-                value={withdrawForm.source}
-                onChange={e => setWithdrawForm({ ...withdrawForm, source: e.target.value })}
-                style={input}
-              >
-                <option value="savings">Savings (max 20%)</option>
-                <option value="dividends">Dividends (no limit)</option>
-              </select>
-            </Field>
-
-            <Field label="Amount (UGX)">
-              <input
-                type="number"
-                value={withdrawForm.amount}
-                onChange={e => setWithdrawForm({ ...withdrawForm, amount: e.target.value })}
-                style={input}
-              />
-            </Field>
-
-            <Field label="Notes (optional)">
-              <input
-                type="text"
-                value={withdrawForm.notes}
-                onChange={e => setWithdrawForm({ ...withdrawForm, notes: e.target.value })}
-                style={input}
-              />
-            </Field>
-
-            <button
-              type="button"
-              onClick={async () => {
-                setWithdrawMsg('');
-                if (!withdrawForm.amount || Number(withdrawForm.amount) <= 0) {
-                  return setWithdrawMsg('❌ Enter an amount');
-                }
-                try {
-                  const res = await apiFetch('/api/withdrawals', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                      memberId: member.id,
-                      source: withdrawForm.source,
-                      amount: parseFloat(withdrawForm.amount),
-                      notes: withdrawForm.notes,
-                      requestedBy: 'member'
-                    })
-                  });
-                  const d = await res.json();
-                  if (res.ok) {
-                    setWithdrawMsg('✅ ' + d.message);
-                    setWithdrawForm({ source: 'savings', amount: '', notes: '' });
-                    fetchAll(member.id);
-                  } else {
-                    setWithdrawMsg('❌ ' + d.error);
-                  }
-                } catch (err) { setWithdrawMsg('❌ Network error'); }
-              }}
-              style={{ padding: '12px 24px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}
-            >Submit Request</button>
-          </div>
-
-          <h3>My Withdrawals</h3>
-          {(withdrawals?.withdrawals || []).length === 0 ? (
-            <p style={{ color: '#6b7280' }}>No withdrawals yet.</p>
+          {/* Table */}
+          <h3 style={{ fontSize: '15px', color: '#334155', marginBottom: '8px' }}>My Withdrawal Requests</h3>
+          {savingsWithdrawalsOnly.length === 0 ? (
+            <p style={{ color: '#94a3b8', fontSize: '13px' }}>You have no withdrawal requests yet.</p>
           ) : (
-            <table style={table}>
-              <thead>
-                <tr style={thead}>
-                  <th style={th}>Date</th>
-                  <th style={th}>Source</th>
-                  <th style={th}>Amount</th>
-                  <th style={th}>Status</th>
-                  <th style={th}>Payment</th>
-                </tr>
-              </thead>
-              <tbody>
-                {withdrawals.withdrawals.map(w => (
-                  <tr key={w._id} style={tr}>
-                    <td style={td}>{new Date(w.requestedDate).toLocaleDateString()}</td>
-                    <td style={{ ...td, textTransform: 'capitalize' }}>{w.source}</td>
-                    <td style={td}>UGX {w.amount.toLocaleString()}</td>
-                    <td style={td}>
-                      <span style={{
-                        padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: '600',
-                        background: w.status === 'paid' ? '#dcfce7' : w.status === 'rejected' ? '#fee2e2' : w.status === 'approved' ? '#e0f2fe' : '#fef9e7',
-                        color: w.status === 'paid' ? '#065f46' : w.status === 'rejected' ? '#991b1b' : w.status === 'approved' ? '#0369a1' : '#b45309'
-                      }}>{w.status}</span>
-                    </td>
-                    <td style={td}>{w.paymentMethod || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid #e5e7eb' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead><tr style={{ background: '#f8fafc' }}>
+                  <th style={thL}>Date</th><th style={thL}>Amount</th><th style={thL}>Status</th><th style={thL}>Note</th>
+                </tr></thead>
+                <tbody>
+                  {savingsWithdrawalsOnly.map(w => (
+                    <tr key={w._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={tdL}>{new Date(w.requestedDate).toLocaleDateString()}</td>
+                      <td style={tdL}>UGX {Number(w.amount || 0).toLocaleString()}</td>
+                      <td style={tdL}>
+                        <span style={{
+                          padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600,
+                          background: w.status === 'paid' ? '#dcfce7' : w.status === 'rejected' ? '#fee2e2' : w.status === 'pending' ? '#fef9e7' : '#e0f2fe',
+                          color: w.status === 'paid' ? '#065f46' : w.status === 'rejected' ? '#991b1b' : w.status === 'pending' ? '#b45309' : '#0369a1'
+                        }}>{String(w.status || '').toUpperCase()}</span>
+                      </td>
+                      <td style={{ ...tdL, color: '#64748b' }}>
+                        {w.status === 'rejected' && w.rejectionReason ? `Rejected: ${w.rejectionReason}` : (w.notes || '—')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}
 
-      {tab === 'club' && clubStats && (
+      {tab === 'club' && (
         <div>
-          <h2>Club Statistics</h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
-            <Card title="Total Club Capital" value={clubStats.totalClubCapital} color="#0369a1" bg="#e0f2fe" />
-            <Card title="Total Member Savings" value={clubStats.totalMemberSavings} color="#15803d" bg="#dcfce7" />
-            <Card title="Total Shares" value={clubStats.totalShares} color="#7c3aed" bg="#f3e8ff" raw />
-            <Card title="Total Miscellaneous" value={clubStats.totalMisc} color="#b45309" bg="#fef9e7" />
-            <Card title="Total Penalties" value={clubStats.totalPenalty} color="#dc2626" bg="#fee2e2" />
-            <Card title="Total Donations" value={clubStats.totalDonation} color="#0891b2" bg="#cffafe" />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <h2 style={{ margin: 0 }}>🏛️ Club Statistics</h2>
+            <button onClick={refreshClubStats} style={{ padding: '8px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' }}>🔄 Refresh</button>
           </div>
+          {!clubStats ? <p style={{ color: '#64748b' }}>Loading…</p> : (
+            <>
+              <div style={{ background: 'linear-gradient(135deg, #0f3460 0%, #1e40af 100%)', color: '#fff', padding: '24px 28px', borderRadius: '14px', marginBottom: '20px', boxShadow: '0 8px 20px rgba(15,52,96,0.25)' }}>
+                <div style={{ fontSize: '13px', opacity: 0.75, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '6px' }}>💠 Grand Total Available</div>
+                <div style={{ fontSize: '38px', fontWeight: 800, letterSpacing: '0.5px' }}>UGX {Number(clubStats.grandTotal || 0).toLocaleString()}</div>
+                <div style={{ fontSize: '12px', opacity: 0.75, marginTop: '6px' }}>Club Capital + Member Savings combined</div>
+              </div>
 
-          <h3 style={{ marginTop: '24px' }}>Business Profits</h3>
-          <table style={table}>
-            <thead><tr style={thead}><th style={th}>Business</th><th style={th}>Current Balance</th><th style={th}>Profit Extracted</th></tr></thead>
-            <tbody>
-              {(clubStats?.businessStats || []).map((b, i) => (
-                <tr key={i} style={tr}>
-                  <td style={td}>{b.name}</td>
-                  <td style={td}>UGX {(b.currentBalance || 0).toLocaleString()}</td>
-                  <td style={td}>UGX {(b.totalProfit || 0).toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+              <SectionTitle>📌 Overview</SectionTitle>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+                <StatCard label="Club Capital" value={clubStats.totalClubCapital} color="#0369a1" bg="#e0f2fe" highlight />
+                <StatCard label="Member Savings" value={clubStats.totalMemberSavings} color="#15803d" bg="#dcfce7" highlight />
+                <StatCard label="Total Shares Value" value={clubStats.totalShareValue || 0} color="#7c3aed" bg="#f3e8ff" highlight />
+                <StatCard label="Number of Members" value={clubStats.totalMembers} color="#475569" bg="#f1f5f9" raw highlight />
+              </div>
+
+              <SectionTitle>💰 Member Savings Breakdown</SectionTitle>
+              <div style={gridCards}>
+                <StatCard label="Monthly" value={clubStats.totalMonthly} color="#0369a1" bg="#e0f2fe" />
+                <StatCard label="Extra" value={clubStats.totalExtra} color="#0d9488" bg="#ccfbf1" />
+              </div>
+
+              <SectionTitle>🏦 Club Capital Breakdown</SectionTitle>
+              <div style={gridCards}>
+                <StatCard label="Penalties" value={clubStats.totalPenalty} color="#dc2626" bg="#fee2e2" />
+                <StatCard label="Miscellaneous" value={clubStats.totalMisc} color="#7c3aed" bg="#f3e8ff" />
+                <StatCard label="Membership" value={clubStats.totalMembership} color="#c2410c" bg="#ffedd5" />
+                <StatCard label="Constitution" value={clubStats.totalConstitution} color="#4f46e5" bg="#e0e7ff" />
+                <StatCard label="Donations" value={clubStats.totalDonation} color="#be185d" bg="#fce7f3" />
+              </div>
+
+              <SectionTitle>📊 Shares</SectionTitle>
+              <div style={gridCards}>
+                <StatCard label="Total Shares (Count)" value={clubStats.totalShares} color="#7c3aed" bg="#f3e8ff" raw />
+                <StatCard label="Total Shares (Value)" value={clubStats.totalShareValue || 0} color="#7c3aed" bg="#ede9fe" />
+              </div>
+
+              {(clubStats.businessStats || []).length > 0 && (
+                <>
+                  <SectionTitle>💼 Businesses</SectionTitle>
+                  <div style={gridCards}>
+                    {clubStats.businessStats.map((b, i) => (
+                      <div key={i} style={{ background: '#f8fafc', padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: '4px', color: '#334155' }}>{b.name}</div>
+                        <div style={{ fontSize: '10px', color: '#64748b' }}>Balance</div>
+                        <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f3460' }}>UGX {Number(b.currentBalance || 0).toLocaleString()}</div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              <div style={{ marginTop: '20px', fontSize: '11px', color: '#94a3b8', textAlign: 'right' }}>
+                Last updated: {clubStats.lastUpdated ? new Date(clubStats.lastUpdated).toLocaleString() : '—'}
+                <span style={{ marginLeft: '8px' }}>· Auto-refresh every 30s</span>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {tab === 'constitution' && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+            <h2 style={{ margin: 0 }}>📖 Club Constitution</h2>
+            <button onClick={refreshConstitution} disabled={constitutionRefreshing} style={{ padding: '8px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px', cursor: constitutionRefreshing ? 'wait' : 'pointer', fontWeight: '600', fontSize: '13px', opacity: constitutionRefreshing ? 0.6 : 1 }}>
+              {constitutionRefreshing ? '⏳ Checking…' : '🔄 Refresh'}
+            </button>
+          </div>
+          <p style={{ color: '#64748b', fontSize: '13px', marginBottom: '20px' }}>Download the official club constitution. Access is granted after payment.</p>
+
+          {!constitution ? (
+            <p>Loading…</p>
+          ) : !constitution.hasConstitution ? (
+            <div style={{ padding: '30px', textAlign: 'center', background: '#f8fafc', borderRadius: '12px', border: '1px dashed #cbd5e1' }}>
+              <div style={{ fontSize: '40px', marginBottom: '8px' }}>📖</div>
+              <p style={{ color: '#64748b', margin: 0 }}>Constitution has not been uploaded yet.</p>
+            </div>
+          ) : constitution.paid ? (
+            <div style={{ background: '#dcfce7', padding: '24px', borderRadius: '12px', border: '1px solid #86efac' }}>
+              <div style={{ fontSize: '16px', fontWeight: 700, color: '#065f46', marginBottom: '8px' }}>✅ Access Granted</div>
+              <div style={{ fontSize: '13px', color: '#065f46', marginBottom: '14px' }}>
+                <strong>{constitution.constitution?.title}</strong> — v{constitution.constitution?.version}
+              </div>
+              <a href={`${API}/api/member/constitution/download?memberId=${member.id}`} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', padding: '12px 24px', background: '#0f3460', color: '#fff', borderRadius: '8px', textDecoration: 'none', fontWeight: 700 }}>📄 Download</a>
+            </div>
+          ) : (
+            <div style={{ background: '#fef9e7', padding: '24px', borderRadius: '12px', border: '1px solid #fcd34d' }}>
+              <div style={{ fontSize: '16px', fontWeight: 700, color: '#b45309', marginBottom: '8px' }}>🔒 Payment Required</div>
+              <div style={{ fontSize: '22px', fontWeight: 800, color: '#b45309' }}>UGX {(constitution.fee || 0).toLocaleString()}</div>
+            </div>
+          )}
         </div>
       )}
 
       {tab === 'contacts' && (
         <div>
           <h2>Club Leadership</h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' }}>
-            {leaders.length === 0 ? <p>No leaders set up yet.</p> : leaders.map(l => (
-              <div key={l._id} style={{ background: '#f8fafc', padding: '20px', borderRadius: '12px' }}>
-                <div style={{ fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '600' }}>{l.role}</div>
-                <div style={{ fontSize: '18px', fontWeight: '600', marginTop: '4px' }}>{l.name}</div>
-                <div style={{ color: '#334155', fontSize: '14px', marginTop: '8px' }}>📞 {l.contact}</div>
-                {l.email && <div style={{ color: '#334155', fontSize: '14px' }}>✉️ {l.email}</div>}
-              </div>
-            ))}
-          </div>
+          {leaders.map(l => (
+            <div key={l._id} style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', marginBottom: '10px' }}>
+              <div style={{ fontSize: '12px', color: '#64748b', textTransform: 'uppercase' }}>{l.role}</div>
+              <div style={{ fontSize: '16px', fontWeight: 600 }}>{l.name}</div>
+              <div style={{ fontSize: '13px' }}>📞 {l.contact}</div>
+            </div>
+          ))}
         </div>
       )}
 
       {tab === 'password' && <ChangePasswordForm memberId={member.id} />}
 
-      {showApplyLoan && (
-        <div style={modalBg}>
-          <div style={modalBox}>
-            <h2 style={{ marginTop: 0 }}>Apply for Loan</h2>
-            <form onSubmit={handleApplyLoan}>
-              <Field label="Loan Type">
-                <select value={loanForm.type} onChange={e => setLoanForm({ ...loanForm, type: e.target.value })} style={input}>
-                  <option value="emergency">Emergency (1 month)</option>
-                  <option value="school_fees">School Fees (1-3 months)</option>
-                  <option value="business">Business (1-6 months)</option>
+      {pdfModal && <PdfOptionsModal title={pdfModal.title} baseUrl={pdfModal.url} onClose={() => setPdfModal(null)} />}
+
+      {/* ==================== DEPOSIT MODAL ==================== */}
+      {showDepositModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', borderRadius: '14px', padding: '26px', width: '480px', maxWidth: '92vw' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <h2 style={{ margin: 0, fontSize: '18px' }}>➕ Deposit Money</h2>
+              <button onClick={() => { setShowDepositModal(false); setDepositMsg(''); }} style={{ background: 'transparent', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#64748b' }}>✕</button>
+            </div>
+
+            <div style={{ background: '#fef9e7', border: '1px solid #fcd34d', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '12px', color: '#78350f' }}>
+              ⓘ Your deposit request will be <strong>pending</strong> until the admin physically receives the money and approves it.
+            </div>
+
+            {depositMsg && (
+              <div style={{ padding: '12px', borderRadius: '8px', marginBottom: '14px', background: depositMsg.startsWith('✅') ? '#dcfce7' : '#fee2e2', color: depositMsg.startsWith('✅') ? '#065f46' : '#991b1b', fontWeight: 600, fontSize: '13px' }}>{depositMsg}</div>
+            )}
+
+            <form onSubmit={submitDepositRequest}>
+              <div style={{ marginBottom: '14px' }}>
+                <label style={labelSm}>Category</label>
+                <select value={depositForm.category} onChange={e => setDepositForm({ ...depositForm, category: e.target.value })} style={inputStyle}>
+                  <option value="monthly">Monthly Savings</option>
+                  <option value="extra">Extra Savings</option>
+                  <option value="misc">Miscellaneous</option>
+                  <option value="penalty">Penalty</option>
                 </select>
-              </Field>
-              <Field label="Amount (UGX)"><input type="number" value={loanForm.amount} onChange={e => setLoanForm({ ...loanForm, amount: e.target.value })} required style={input} /></Field>
-              <Field label="Duration (months)"><input type="number" value={loanForm.duration} onChange={e => setLoanForm({ ...loanForm, duration: e.target.value })} required style={input} /></Field>
-              <Field label="Repayment Schedule">
-                <select value={loanForm.scheduleUnit} onChange={e => setLoanForm({ ...loanForm, scheduleUnit: e.target.value })} style={input}>
-                  <option value="weekly">Weekly</option>
-                  <option value="monthly">Monthly</option>
-                </select>
-              </Field>
-              <Field label="Purpose"><input type="text" value={loanForm.purpose} onChange={e => setLoanForm({ ...loanForm, purpose: e.target.value })} style={input} /></Field>
-              <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
-                <button type="submit" style={btn('#2563eb')}>Submit</button>
-                <button type="button" onClick={() => setShowApplyLoan(false)} style={btn('#6b7280')}>Cancel</button>
+              </div>
+              <div style={{ marginBottom: '14px' }}>
+                <label style={labelSm}>Amount (UGX)</label>
+                <input type="number" min="1" value={depositForm.amount} onChange={e => setDepositForm({ ...depositForm, amount: e.target.value })} required style={inputStyle} />
+              </div>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={labelSm}>Note (optional)</label>
+                <textarea value={depositForm.note} onChange={e => setDepositForm({ ...depositForm, note: e.target.value })} rows="2" style={{ ...inputStyle, resize: 'vertical' }} placeholder="e.g., March savings deposit" />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <button type="button" onClick={() => { setShowDepositModal(false); setDepositMsg(''); }} disabled={depositBusy} style={{ padding: '10px 18px', background: '#e5e7eb', color: '#1f2937', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                <button type="submit" disabled={depositBusy} style={{ padding: '10px 22px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: depositBusy ? 'wait' : 'pointer' }}>
+                  {depositBusy ? 'Submitting…' : '✅ Submit Request'}
+                </button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {scheduleModal && (
-        <div style={modalBg}>
-          <div style={{ ...modalBox, width: '800px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
-              <h2 style={{ margin: 0 }}>Repayment Schedule</h2>
-              <button onClick={() => setScheduleModal(null)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+      {/* ==================== WITHDRAW MODAL ==================== */}
+      {showWithdrawModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', borderRadius: '14px', padding: '26px', width: '480px', maxWidth: '92vw' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <h2 style={{ margin: 0, fontSize: '18px' }}>💸 Request Withdrawal</h2>
+              <button onClick={() => { setShowWithdrawModal(false); setWithdrawMsg(''); }} style={{ background: 'transparent', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#64748b' }}>✕</button>
             </div>
 
-            {(() => {
-              const loan = scheduleModal.loan || {};
-              const reps = scheduleModal.repayments || [];
-              const principal = Number(loan.amount) || 0;
-              const total = Number(loan.totalRepayable) || 0;
-              const totalInstallments = reps.length || 1;
-              const principalPerInst = principal / totalInstallments;
-              let runningBalance = total;
-
-              return (
-                <>
-                  <div style={{ marginBottom: '12px', fontSize: '13px', color: '#64748b' }}>
-                    <strong>Type:</strong> {(loan.type || '').replace('_', ' ')} |{' '}
-                    <strong>Amount:</strong> UGX {principal.toLocaleString()} |{' '}
-                    <strong>Rate:</strong> {loan.interestRate || 0}% |{' '}
-                    <strong>Total:</strong> UGX {total.toLocaleString()}
-                  </div>
-
-                  {reps.length === 0 ? (
-                    <p style={{ color: '#6b7280' }}>No schedule items.</p>
-                  ) : (
-                    <div style={{ maxHeight: '420px', overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '8px' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                        <thead style={{ position: 'sticky', top: 0 }}>
-                          <tr style={{ background: '#0f3460', color: '#fff' }}>
-                            <th style={th}>#</th>
-                            <th style={th}>Due Date</th>
-                            <th style={th}>Payment</th>
-                            <th style={th}>Interest</th>
-                            <th style={th}>Principal</th>
-                            <th style={th}>Balance</th>
-                            <th style={th}>Status</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {reps.map((r, i) => {
-                            const payment = Number(r.amountDue) || 0;
-                            const interest = Math.max(0, payment - principalPerInst);
-                            runningBalance = Math.max(0, runningBalance - payment);
-                            return (
-                              <tr key={i} style={{ borderBottom: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#fafbfc' }}>
-                                <td style={td}>{r.installmentNumber}</td>
-                                <td style={td}>{new Date(r.dueDate).toLocaleDateString()}</td>
-                                <td style={td}>UGX {payment.toLocaleString()}</td>
-                                <td style={td}>UGX {Math.round(interest).toLocaleString()}</td>
-                                <td style={td}>UGX {Math.round(principalPerInst).toLocaleString()}</td>
-                                <td style={{ ...td, fontWeight: '600', color: runningBalance === 0 ? '#15803d' : '#b45309' }}>
-                                  UGX {Math.round(runningBalance).toLocaleString()}
-                                </td>
-                                <td style={td}>
-                                  <span style={{
-                                    padding: '3px 8px', borderRadius: '12px', fontSize: '11px',
-                                    background: r.status === 'paid' ? '#d1fae5' : '#fef9e7',
-                                    color: r.status === 'paid' ? '#065f46' : '#b45309'
-                                  }}>{r.status || 'pending'}</span>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </>
-              );
-            })()}
-
-            <div style={{ marginTop: '16px', textAlign: 'right' }}>
-              <button onClick={() => setScheduleModal(null)} style={btn('#6b7280')}>Close</button>
+            <div style={{ background: '#e0f2fe', padding: '12px 14px', borderRadius: '10px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '12px', color: '#0369a1', fontWeight: 600 }}>Max Withdrawable</span>
+              <span style={{ fontSize: '16px', color: '#0369a1', fontWeight: 800 }}>UGX {maxWithdrawable.toLocaleString()}</span>
             </div>
+
+            {withdrawMsg && (
+              <div style={{ padding: '12px', borderRadius: '8px', marginBottom: '14px', background: withdrawMsg.startsWith('✅') ? '#dcfce7' : '#fee2e2', color: withdrawMsg.startsWith('✅') ? '#065f46' : '#991b1b', fontWeight: 600, fontSize: '13px' }}>{withdrawMsg}</div>
+            )}
+
+            <form onSubmit={submitWithdrawRequest}>
+              <div style={{ marginBottom: '14px' }}>
+                <label style={labelSm}>Amount (UGX)</label>
+                <input type="number" min="1" max={maxWithdrawable} value={withdrawForm.amount} onChange={e => setWithdrawForm({ ...withdrawForm, amount: e.target.value })} required style={inputStyle} />
+                {Number(withdrawForm.amount) > maxWithdrawable && (
+                  <div style={{ fontSize: '12px', color: '#dc2626', marginTop: '4px', fontWeight: 600 }}>❌ Exceeds maximum UGX {maxWithdrawable.toLocaleString()}</div>
+                )}
+              </div>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={labelSm}>Note (optional)</label>
+                <textarea value={withdrawForm.notes} onChange={e => setWithdrawForm({ ...withdrawForm, notes: e.target.value })} rows="2" style={{ ...inputStyle, resize: 'vertical' }} placeholder="Reason for withdrawal" />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <button type="button" onClick={() => { setShowWithdrawModal(false); setWithdrawMsg(''); }} disabled={withdrawBusy} style={{ padding: '10px 18px', background: '#e5e7eb', color: '#1f2937', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                <button type="submit" disabled={withdrawBusy || Number(withdrawForm.amount) > maxWithdrawable || Number(withdrawForm.amount) <= 0} style={{ padding: '10px 22px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: (withdrawBusy || Number(withdrawForm.amount) > maxWithdrawable) ? 'not-allowed' : 'pointer', opacity: (withdrawBusy || Number(withdrawForm.amount) > maxWithdrawable || Number(withdrawForm.amount) <= 0) ? 0.5 : 1 }}>
+                  {withdrawBusy ? 'Submitting…' : '✅ Submit Request'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      {pdfModal && (
-        <PdfOptionsModal
-          title={pdfModal.title}
-          baseUrl={pdfModal.url}
-          onClose={() => setPdfModal(null)}
-        />
+      {showDivAction && divSummary && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', borderRadius: '14px', padding: '26px', width: '500px', maxWidth: '92vw' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <h2 style={{ margin: 0, fontSize: '18px' }}>
+                {showDivAction === 'withdraw' && '💸 Withdraw to Cash'}
+                {showDivAction === 'to_shares' && '📊 Buy More Shares'}
+                {showDivAction === 'to_savings' && '💰 Add to Savings'}
+                {showDivAction === 'donate' && '🏛️ Donate to Club'}
+              </h2>
+              <button onClick={() => { setShowDivAction(null); setDivMsg(''); }} style={{ background: 'transparent', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#64748b' }}>✕</button>
+            </div>
+
+            <div style={{ background: '#cffafe', padding: '12px 14px', borderRadius: '10px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '12px', color: '#0e7490', fontWeight: 600 }}>Available Dividends</span>
+              <span style={{ fontSize: '16px', color: '#0e7490', fontWeight: 800 }}>UGX {Number(divSummary.dividendBalance || 0).toLocaleString()}</span>
+            </div>
+
+            {divMsg && (
+              <div style={{ padding: '12px', borderRadius: '8px', marginBottom: '14px', background: divMsg.startsWith('✅') ? '#dcfce7' : '#fee2e2', color: divMsg.startsWith('✅') ? '#065f46' : '#991b1b', fontWeight: 600, fontSize: '13px' }}>{divMsg}</div>
+            )}
+
+            <form onSubmit={submitDivAction}>
+              {showDivAction === 'to_shares' ? (
+                <>
+                  <div style={{ marginBottom: '14px' }}>
+                    <label style={labelSm}>Share Type</label>
+                    <select value={divForm.shareType} onChange={e => setDivForm({ ...divForm, shareType: e.target.value })} style={inputStyle}>
+                      <option value="golden">Golden — UGX {Number(sharePrices.golden?.price || 0).toLocaleString()}</option>
+                      <option value="platinum">Platinum — UGX {Number(sharePrices.platinum?.price || 0).toLocaleString()}</option>
+                      <option value="silver">Silver — UGX {Number(sharePrices.silver?.price || 0).toLocaleString()}</option>
+                      <option value="bronze">Ordinary — UGX {Number(sharePrices.ordinary?.price || 0).toLocaleString()}</option>
+                    </select>
+                  </div>
+                  <div style={{ marginBottom: '14px' }}>
+                    <label style={labelSm}>Quantity</label>
+                    <input type="number" min="1" value={divForm.quantity} onChange={e => setDivForm({ ...divForm, quantity: e.target.value })} required style={inputStyle} />
+                  </div>
+                  <div style={{ background: '#0f3460', color: '#fff', padding: '12px 16px', borderRadius: '10px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: '13px' }}>Total Cost</span>
+                    <span style={{ fontSize: '18px', fontWeight: 800 }}>
+                      UGX {Number(
+                        (parseInt(divForm.quantity) || 0) *
+                        Number(sharePrices[{ golden: 'golden', platinum: 'platinum', silver: 'silver', bronze: 'ordinary' }[divForm.shareType]]?.price || 0)
+                      ).toLocaleString()}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <div style={{ marginBottom: '14px' }}>
+                  <label style={labelSm}>Amount (UGX)</label>
+                  <input type="number" min="1" max={divSummary.dividendBalance} value={divForm.amount} onChange={e => setDivForm({ ...divForm, amount: e.target.value })} required style={inputStyle} />
+                  <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>Max: UGX {Number(divSummary.dividendBalance).toLocaleString()}</div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <button type="button" onClick={() => { setShowDivAction(null); setDivMsg(''); }} disabled={divBusy} style={{ padding: '10px 18px', background: '#e5e7eb', color: '#1f2937', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                <button type="submit" disabled={divBusy} style={{ padding: '10px 22px', background: '#0891b2', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: divBusy ? 'wait' : 'pointer', opacity: divBusy ? 0.6 : 1 }}>
+                  {divBusy ? 'Processing…' : '✅ Confirm'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showShareModal && (() => {
+        const settingsKey = { golden: 'golden', platinum: 'platinum', silver: 'silver', bronze: 'ordinary' }[shareForm.shareType];
+        const typeSettings = sharePrices[settingsKey] || {};
+        const unitPrice = Number(typeSettings.price || 0);
+        const maxPerType = Number(typeSettings.maxShares || 15);
+        const ownedOfType = Number(shares?.shares?.[shareForm.shareType]?.quantity || 0);
+        const remainingOfType = Math.max(0, maxPerType - ownedOfType);
+        const remainingTotal = Math.max(0, 15 - totalShareQty);
+        const maxAllowed = Math.min(remainingOfType, remainingTotal);
+        const qty = parseInt(shareForm.quantity) || 0;
+        const amountDue = qty * unitPrice;
+
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+            <div style={{ background: '#fff', borderRadius: '14px', padding: '26px', width: '520px', maxWidth: '92vw', maxHeight: '92vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                <h2 style={{ margin: 0, fontSize: '18px' }}>📊 Apply for Shares</h2>
+                <button onClick={() => { setShowShareModal(false); setShareMsg(''); }} style={{ background: 'transparent', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#64748b' }}>✕</button>
+              </div>
+
+              {shareMsg && (
+                <div style={{ padding: '12px', borderRadius: '8px', marginBottom: '14px', background: shareMsg.startsWith('✅') ? '#dcfce7' : '#fee2e2', color: shareMsg.startsWith('✅') ? '#065f46' : '#991b1b', fontWeight: 600, fontSize: '13px' }}>{shareMsg}</div>
+              )}
+
+              <form onSubmit={submitShareApplication}>
+                <div style={{ marginBottom: '14px' }}>
+                  <label style={labelSm}>Share Type</label>
+                  <select value={shareForm.shareType} onChange={e => setShareForm({ ...shareForm, shareType: e.target.value })} style={inputStyle}>
+                    <option value="golden">Golden — UGX {Number(sharePrices.golden?.price || 0).toLocaleString()}</option>
+                    <option value="platinum">Platinum — UGX {Number(sharePrices.platinum?.price || 0).toLocaleString()}</option>
+                    <option value="silver">Silver — UGX {Number(sharePrices.silver?.price || 0).toLocaleString()}</option>
+                    <option value="bronze">Ordinary — UGX {Number(sharePrices.ordinary?.price || 0).toLocaleString()}</option>
+                  </select>
+                </div>
+
+                <div style={{ marginBottom: '14px' }}>
+                  <label style={labelSm}>Quantity (max {maxAllowed})</label>
+                  <input type="number" min="1" max={maxAllowed} value={shareForm.quantity} onChange={e => setShareForm({ ...shareForm, quantity: e.target.value })} required style={inputStyle} />
+                </div>
+
+                <div style={{ marginBottom: '14px' }}>
+                  <label style={labelSm}>Payment Method</label>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <label style={{ flex: 1, padding: '10px', border: `2px solid ${shareForm.paymentMethod === 'cash' ? '#2563eb' : '#e5e7eb'}`, borderRadius: '8px', cursor: 'pointer', textAlign: 'center', background: shareForm.paymentMethod === 'cash' ? '#eff6ff' : '#fff', fontWeight: 600, fontSize: '13px' }}>
+                      <input type="radio" checked={shareForm.paymentMethod === 'cash'} onChange={() => setShareForm({ ...shareForm, paymentMethod: 'cash' })} style={{ display: 'none' }} />
+                      💵 Cash
+                    </label>
+                    <label style={{ flex: 1, padding: '10px', border: `2px solid ${shareForm.paymentMethod === 'savings' ? '#2563eb' : '#e5e7eb'}`, borderRadius: '8px', cursor: 'pointer', textAlign: 'center', background: shareForm.paymentMethod === 'savings' ? '#eff6ff' : '#fff', fontWeight: 600, fontSize: '13px' }}>
+                      <input type="radio" checked={shareForm.paymentMethod === 'savings'} onChange={() => setShareForm({ ...shareForm, paymentMethod: 'savings' })} style={{ display: 'none' }} />
+                      💰 From Savings
+                    </label>
+                  </div>
+                </div>
+
+                <div style={{ background: '#0f3460', color: '#fff', padding: '14px 18px', borderRadius: '10px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '13px', opacity: 0.8 }}>Total Amount Due</span>
+                  <span style={{ fontSize: '22px', fontWeight: 800 }}>UGX {amountDue.toLocaleString()}</span>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                  <button type="button" onClick={() => { setShowShareModal(false); setShareMsg(''); }} disabled={sharing} style={{ padding: '10px 18px', background: '#e5e7eb', color: '#1f2937', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                  <button type="submit" disabled={sharing || qty <= 0 || qty > maxAllowed} style={{ padding: '10px 22px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: sharing ? 'wait' : 'pointer', opacity: (sharing || qty <= 0 || qty > maxAllowed) ? 0.5 : 1 }}>
+                    {sharing ? 'Submitting…' : '✅ Submit Request'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
+
+      {showApplyModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', borderRadius: '14px', padding: '26px', width: '520px', maxWidth: '92vw', maxHeight: '92vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <h2 style={{ margin: 0, fontSize: '18px' }}>🏦 Apply for Loan</h2>
+              <button onClick={() => { setShowApplyModal(false); setApplyMessage(''); }} style={{ background: 'transparent', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#64748b' }}>✕</button>
+            </div>
+
+            <div style={{ background: '#dcfce7', border: '1px solid #86efac', padding: '14px', borderRadius: '10px', marginBottom: '18px' }}>
+              <div style={{ fontSize: '12px', color: '#065f46', textTransform: 'uppercase', fontWeight: 600 }}>Your Loan Limit</div>
+              <div style={{ fontSize: '26px', fontWeight: 800, color: '#065f46' }}>UGX {Number(loanEligibility?.maxAmount || 0).toLocaleString()}</div>
+            </div>
+
+            {applyMessage && (
+              <div style={{ padding: '12px', borderRadius: '8px', marginBottom: '14px', background: applyMessage.startsWith('✅') ? '#dcfce7' : '#fee2e2', color: applyMessage.startsWith('✅') ? '#065f46' : '#991b1b', fontWeight: 600, fontSize: '13px' }}>{applyMessage}</div>
+            )}
+
+            <form onSubmit={submitLoanApplication}>
+              <div style={{ marginBottom: '14px' }}>
+                <label style={labelSm}>Loan Type</label>
+                <select value={applyForm.type} onChange={e => setApplyForm({ ...applyForm, type: e.target.value })} style={inputStyle}>
+                  <option value="emergency">Emergency</option>
+                  <option value="school_fees">School Fees</option>
+                  <option value="business">Business</option>
+                </select>
+              </div>
+              <div style={{ marginBottom: '14px' }}>
+                <label style={labelSm}>Amount (UGX)</label>
+                <input type="number" min="1" max={loanEligibility?.maxAmount || 0} value={applyForm.amount} onChange={e => setApplyForm({ ...applyForm, amount: e.target.value })} required style={inputStyle} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+                <div>
+                  <label style={labelSm}>Duration (months)</label>
+                  <input type="number" min="1" max="24" value={applyForm.duration} onChange={e => setApplyForm({ ...applyForm, duration: e.target.value })} required style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelSm}>Schedule</label>
+                  <select value={applyForm.scheduleUnit} onChange={e => setApplyForm({ ...applyForm, scheduleUnit: e.target.value })} style={inputStyle}>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <button type="button" onClick={() => { setShowApplyModal(false); setApplyMessage(''); }} disabled={applying} style={{ padding: '10px 18px', background: '#e5e7eb', color: '#1f2937', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                <button type="submit" disabled={applying} style={{ padding: '10px 22px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: applying ? 'wait' : 'pointer' }}>
+                  {applying ? 'Submitting…' : '✅ Submit'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -772,34 +1304,24 @@ export default function MemberDashboard() {
 function ChangePasswordForm({ memberId }) {
   const [form, setForm] = useState({ currentPassword: '', newPassword: '', confirm: '' });
   const [msg, setMsg] = useState('');
-
   const submit = async (e) => {
     e.preventDefault();
     if (form.newPassword !== form.confirm) return setMsg('❌ Passwords do not match');
     try {
-      const res = await apiFetch(`/api/member/me/${memberId}/change-password`, {
-        method: 'PUT',
-        body: JSON.stringify({ currentPassword: form.currentPassword, newPassword: form.newPassword })
-      });
+      const res = await apiFetch(`/api/member/me/${memberId}/change-password`, { method: 'PUT', body: JSON.stringify({ currentPassword: form.currentPassword, newPassword: form.newPassword }) });
       const d = await res.json();
-      if (res.ok) {
-        setMsg('✅ Password changed successfully');
-        setForm({ currentPassword: '', newPassword: '', confirm: '' });
-      } else setMsg('❌ ' + d.error);
+      if (res.ok) { setMsg('✅ Password changed'); setForm({ currentPassword: '', newPassword: '', confirm: '' }); }
+      else setMsg('❌ ' + d.error);
     } catch (err) { setMsg('❌ Network error'); }
   };
-
   return (
-    <div>
-      <h2>Change Password</h2>
+    <form onSubmit={submit} style={{ maxWidth: '400px' }}>
       {msg && <p style={{ padding: '10px', background: '#f1f5f9', borderRadius: '8px' }}>{msg}</p>}
-      <form onSubmit={submit} style={{ maxWidth: '400px' }}>
-        <Field label="Current Password"><input type="password" value={form.currentPassword} onChange={e => setForm({ ...form, currentPassword: e.target.value })} required style={input} /></Field>
-        <Field label="New Password"><input type="password" value={form.newPassword} onChange={e => setForm({ ...form, newPassword: e.target.value })} required minLength="6" style={input} /></Field>
-        <Field label="Confirm New Password"><input type="password" value={form.confirm} onChange={e => setForm({ ...form, confirm: e.target.value })} required style={input} /></Field>
-        <button type="submit" style={btn('#2563eb')}>Change Password</button>
-      </form>
-    </div>
+      <Field label="Current Password"><input type="password" value={form.currentPassword} onChange={e => setForm({ ...form, currentPassword: e.target.value })} required style={input} /></Field>
+      <Field label="New Password"><input type="password" value={form.newPassword} onChange={e => setForm({ ...form, newPassword: e.target.value })} required minLength="6" style={input} /></Field>
+      <Field label="Confirm"><input type="password" value={form.confirm} onChange={e => setForm({ ...form, confirm: e.target.value })} required style={input} /></Field>
+      <button type="submit" style={btn('#2563eb')}>Change Password</button>
+    </form>
   );
 }
 
@@ -808,13 +1330,33 @@ const Card = ({ title, value, color, bg, icon, raw }) => (
     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
       <div>
         <div style={{ fontSize: '14px', color, fontWeight: '500' }}>{title}</div>
-        <div style={{ fontSize: '22px', fontWeight: '700', color }}>
-          {raw ? (value ?? 0) : `UGX ${Number(value || 0).toLocaleString()}`}
-        </div>
+        <div style={{ fontSize: '22px', fontWeight: '700', color }}>{raw ? (value ?? 0) : `UGX ${Number(value || 0).toLocaleString()}`}</div>
       </div>
       {icon && <span style={{ fontSize: '24px' }}>{icon}</span>}
     </div>
   </div>
+);
+
+const StatCard = ({ label, value, color, bg, raw, highlight }) => (
+  <div style={{ background: bg, padding: '12px 14px', borderRadius: '10px', border: highlight ? `2px solid ${color}` : '1px solid transparent' }}>
+    <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '600', marginBottom: '3px', textTransform: 'uppercase' }}>{label}</div>
+    <div style={{ fontSize: '17px', fontWeight: '700', color, lineHeight: 1.2 }}>{raw ? (value ?? 0) : `UGX ${Number(value || 0).toLocaleString()}`}</div>
+  </div>
+);
+
+const ActionBtn = ({ icon, label, onClick, disabled, color }) => (
+  <button onClick={onClick} disabled={disabled} style={{
+    padding: '14px 12px', background: disabled ? '#e5e7eb' : color, color: disabled ? '#94a3b8' : '#fff',
+    border: 'none', borderRadius: '10px', cursor: disabled ? 'not-allowed' : 'pointer',
+    fontWeight: 600, fontSize: '13px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px'
+  }}>
+    <span style={{ fontSize: '22px' }}>{icon}</span>
+    {label}
+  </button>
+);
+
+const SectionTitle = ({ children }) => (
+  <h3 style={{ marginTop: '18px', marginBottom: '8px', fontSize: '14px', color: '#334155', fontWeight: 600 }}>{children}</h3>
 );
 
 const Info = ({ label, value }) => (
@@ -832,12 +1374,10 @@ const Field = ({ label, children }) => (
 );
 
 const btn = (bg) => ({ padding: '10px 20px', background: bg, color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' });
-const btnMini = (bg) => ({ padding: '5px 12px', background: bg, color: '#fff', border: 'none', borderRadius: '6px', marginRight: '6px', cursor: 'pointer', fontSize: '12px' });
-const table = { width: '100%', borderCollapse: 'collapse', fontSize: '14px', marginTop: '10px' };
-const thead = { background: '#f8fafc', borderBottom: '2px solid #e5e7eb' };
-const th = { padding: '10px', textAlign: 'left', fontWeight: '600', color: '#334155' };
-const td = { padding: '10px' };
-const tr = { borderBottom: '1px solid #f1f5f9' };
+const btnMini = (bg) => ({ padding: '5px 10px', background: bg, color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: 600 });
 const input = { width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px' };
-const modalBg = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 };
-const modalBox = { background: '#fff', padding: '30px', borderRadius: '16px', width: '480px', maxHeight: '90vh', overflow: 'auto' };
+const inputStyle = { width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' };
+const labelSm = { display: 'block', fontSize: '12px', fontWeight: '600', color: '#334155', marginBottom: '4px' };
+const thL = { padding: '10px', textAlign: 'left', fontWeight: 600, fontSize: '12px' };
+const tdL = { padding: '10px' };
+const gridCards = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '8px' };

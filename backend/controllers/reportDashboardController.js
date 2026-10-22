@@ -55,7 +55,6 @@ exports.getOverview = async (req, res) => {
 
     const totalBusinessRevenue = businesses.reduce((s, b) => s + fmt(b.currentBalance), 0);
 
-    // Savings trend - last 12 months
     const savingsTrend = [];
     const now = new Date();
     for (let i = 11; i >= 0; i--) {
@@ -75,7 +74,6 @@ exports.getOverview = async (req, res) => {
       });
     }
 
-    // Loans trend - last 12 months
     const loansTrend = [];
     for (let i = 11; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -103,7 +101,6 @@ exports.getOverview = async (req, res) => {
       });
     }
 
-    // Member growth - last 12 months
     const memberGrowth = [];
     for (let i = 11; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -120,7 +117,6 @@ exports.getOverview = async (req, res) => {
       });
     }
 
-    // Loans by status
     const loansByStatus = {
       pending: loans.filter(l => l.status === 'pending').length,
       approved: loans.filter(l => l.status === 'approved').length,
@@ -131,14 +127,12 @@ exports.getOverview = async (req, res) => {
       writeOff: loans.filter(l => l.status === 'writeOff').length
     };
 
-    // Savings by category
     const categoryTotals = {};
     savings.forEach(s => {
       categoryTotals[s.category] = (categoryTotals[s.category] || 0) + fmt(s.amount);
     });
     const savingsByCategory = Object.entries(categoryTotals).map(([category, total]) => ({ category, total })).sort((a, b) => b.total - a.total);
 
-    // Expenses by category
     const expTotals = {};
     expenses.forEach(e => {
       const cat = e.category || 'other';
@@ -146,13 +140,11 @@ exports.getOverview = async (req, res) => {
     });
     const expensesByCategory = Object.entries(expTotals).map(([category, total]) => ({ category, total })).sort((a, b) => b.total - a.total);
 
-    // Top members by savings
     const topSavers = members
       .map(m => ({ name: `${m.firstName} ${m.surname}`, memberNumber: m.memberNumber, savings: fmt(m.savings) }))
       .sort((a, b) => b.savings - a.savings)
       .slice(0, 10);
 
-    // Business performance
     const businessPerformance = [];
     for (const b of businesses) {
       const txns = await BusinessTransaction.find({ businessId: b._id });
@@ -172,7 +164,6 @@ exports.getOverview = async (req, res) => {
       });
     }
 
-    // Recent activity (last 20 savings)
     const recentActivity = savings
       .sort((a, b) => new Date(b.date) - new Date(a.date))
       .slice(0, 15)
@@ -491,13 +482,27 @@ exports.getExpensesSummary = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+// ==================== SHARED PDF HELPERS ====================
+function setPdfNoCache(res) {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+}
+function extractSigs(req) {
+  return req.query.signatories ? req.query.signatories.split(',').filter(Boolean) : [];
+}
+
 // ==================== SAVINGS REPORT PDF ====================
 exports.savingsReportPDF = async (req, res) => {
   try {
-    const result = await new Promise((resolve, reject) => {
+    setPdfNoCache(res);
+    const requestedSigs = extractSigs(req);
+
+    const result = await new Promise((resolve) => {
       exports.getSavingsSummary({}, { json: resolve, status: () => ({ json: resolve }) });
     });
-    await generateSavingsReportPDF(result, res);
+    await generateSavingsReportPDF(result, res, requestedSigs);
   } catch (e) {
     console.error('Savings PDF error:', e.message);
     if (!res.headersSent) res.status(500).json({ error: e.message });
@@ -507,10 +512,13 @@ exports.savingsReportPDF = async (req, res) => {
 // ==================== LOANS REPORT PDF ====================
 exports.loansReportPDF = async (req, res) => {
   try {
+    setPdfNoCache(res);
+    const requestedSigs = extractSigs(req);
+
     const result = await new Promise((resolve) => {
       exports.getLoansSummary({}, { json: resolve, status: () => ({ json: resolve }) });
     });
-    await generateLoansReportPDF(result, res);
+    await generateLoansReportPDF(result, res, requestedSigs);
   } catch (e) {
     console.error('Loans PDF error:', e.message);
     if (!res.headersSent) res.status(500).json({ error: e.message });
@@ -520,22 +528,29 @@ exports.loansReportPDF = async (req, res) => {
 // ==================== MEMBERS REPORT PDF ====================
 exports.membersReportPDF = async (req, res) => {
   try {
+    setPdfNoCache(res);
+    const requestedSigs = extractSigs(req);
+
     const result = await new Promise((resolve) => {
       exports.getMembersSummary({}, { json: resolve, status: () => ({ json: resolve }) });
     });
-    await generateMembersReportPDF(result, res);
+    await generateMembersReportPDF(result, res, requestedSigs);
   } catch (e) {
     console.error('Members PDF error:', e.message);
     if (!res.headersSent) res.status(500).json({ error: e.message });
   }
 };
+
 // ==================== SHARES REPORT PDF ====================
 exports.sharesReportPDF = async (req, res) => {
   try {
+    setPdfNoCache(res);
+    const requestedSigs = extractSigs(req);
+
     const result = await new Promise((resolve) => {
       exports.getSharesSummary({}, { json: resolve, status: () => ({ json: resolve }) });
     });
-    await generateSharesReportPDF(result, res);
+    await generateSharesReportPDF(result, res, requestedSigs);
   } catch (e) {
     console.error('Shares PDF error:', e.message);
     if (!res.headersSent) res.status(500).json({ error: e.message });
@@ -545,10 +560,13 @@ exports.sharesReportPDF = async (req, res) => {
 // ==================== BUSINESS REPORT PDF ====================
 exports.businessReportPDF = async (req, res) => {
   try {
+    setPdfNoCache(res);
+    const requestedSigs = extractSigs(req);
+
     const result = await new Promise((resolve) => {
       exports.getBusinessSummary({}, { json: resolve, status: () => ({ json: resolve }) });
     });
-    await generateBusinessReportPDF(result, res);
+    await generateBusinessReportPDF(result, res, requestedSigs);
   } catch (e) {
     console.error('Business PDF error:', e.message);
     if (!res.headersSent) res.status(500).json({ error: e.message });
@@ -558,10 +576,13 @@ exports.businessReportPDF = async (req, res) => {
 // ==================== EXPENSES REPORT PDF ====================
 exports.expensesReportPDF = async (req, res) => {
   try {
+    setPdfNoCache(res);
+    const requestedSigs = extractSigs(req);
+
     const result = await new Promise((resolve) => {
       exports.getExpensesSummary({}, { json: resolve, status: () => ({ json: resolve }) });
     });
-    await generateExpensesReportPDF(result, res);
+    await generateExpensesReportPDF(result, res, requestedSigs);
   } catch (e) {
     console.error('Expenses PDF error:', e.message);
     if (!res.headersSent) res.status(500).json({ error: e.message });

@@ -9,6 +9,8 @@ const MemberSchema = new mongoose.Schema({
   email: { type: String, default: '' },
   address: { type: String, required: true },
   photo: { type: String, default: '' },
+  signature: { type: String, default: '' },
+  cardQrMessage: { type: String, default: '' },
   memberNumber: { type: String, required: true, unique: true },
   dateOfBirth: { type: Date, required: true },
   dateOfSubscription: { type: Date, default: Date.now },
@@ -21,15 +23,17 @@ const MemberSchema = new mongoose.Schema({
     bronze: { type: Number, default: 0 }
   },
 
-  // Savings (contributions) — 20% cap applies to withdrawals
   savings: { type: Number, default: 0 },
   lockedSavings: { type: Number, default: 0 },
   activeLoanId: { type: mongoose.Schema.Types.ObjectId, ref: 'Loan', default: null },
 
-  // Dividends received — no cap on withdrawal
   dividendBalance: { type: Number, default: 0 },
   totalDividendsReceived: { type: Number, default: 0 },
   totalDividendsWithdrawn: { type: Number, default: 0 },
+
+  constitutionPaid: { type: Boolean, default: false },
+  constitutionPaidDate: { type: Date, default: null },
+  constitutionPaidAmount: { type: Number, default: 0 },
 
   nextOfKin: {
     fullName: { type: String, required: true },
@@ -40,12 +44,16 @@ const MemberSchema = new mongoose.Schema({
     photo: { type: String, default: '' }
   },
 
+  membershipDebt: { type: Number, default: 0 },
+  membershipDebtYear: { type: Number, default: 0 },
+  membershipPaidYear: { type: Number, default: 0 },
+  membershipWaivedYears: { type: [Number], default: [] },
+
   active: { type: Boolean, default: true }
 }, { timestamps: true });
 
 MemberSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
-  // Skip if already a bcrypt hash — prevents double-hashing
   const pwd = String(this.password || '');
   if (pwd.startsWith('$2a$') || pwd.startsWith('$2b$') || pwd.startsWith('$2y$')) {
     return next();
