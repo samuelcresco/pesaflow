@@ -41,38 +41,21 @@ function drawCircularPhoto(doc, photoBuf, cx, cy, radius, borderColor, fallbackI
     doc.circle(cx, cy, radius).clip();
     doc.image(photoBuf, cx - radius, cy - radius, { fit: [radius * 2, radius * 2] });
     doc.restore();
-    doc.circle(cx, cy, radius).strokeColor(borderColor).lineWidth(3).stroke();
+    doc.circle(cx, cy, radius).strokeColor(borderColor).lineWidth(2).stroke();
   } else {
-    doc.circle(cx, cy, radius).fill(fallbackColor).strokeColor(borderColor).lineWidth(3).stroke();
+    doc.circle(cx, cy, radius).fill(fallbackColor).strokeColor(borderColor).lineWidth(2).stroke();
     doc.fillColor(textColor).font('Helvetica-Bold').fontSize(radius * 0.6);
     doc.text(fallbackInitials, cx - radius, cy - radius * 0.35, { width: radius * 2, align: 'center' });
   }
 }
 
-function drawContributionBox(doc, amount, y, W, colors) {
-  if (!amount) return y;
-  const boxH = 60;
-  const boxX = 100;
-  const boxW = W - 200;
-
-  doc.rect(boxX, y, boxW, boxH).fill(colors.bg).strokeColor(colors.primary).lineWidth(1.5).stroke();
-
-  doc.fillColor(colors.subtext).font('Helvetica-Bold').fontSize(9);
-  doc.text('CLUB CONTRIBUTION', boxX, y + 10, { width: boxW, align: 'center', characterSpacing: 1.5 });
-
-  doc.fillColor(colors.primary).font('Helvetica-Bold').fontSize(24);
-  doc.text(`UGX ${Number(amount).toLocaleString()}`, boxX, y + 26, { width: boxW, align: 'center' });
-
-  return y + boxH + 15;
-}
-
 async function drawCardSigs(doc, requestedSigs, y, colors) {
   if (!requestedSigs || requestedSigs.length === 0) return;
   const W = doc.page.width;
-  const M = 60;
+  const M = 40;
   const contentW = W - M * 2;
   const numSigs = requestedSigs.length;
-  const spacing = 20;
+  const spacing = 10;
   const sigW = (contentW - (numSigs - 1) * spacing) / numSigs;
 
   for (let i = 0; i < numSigs; i++) {
@@ -82,365 +65,400 @@ async function drawCardSigs(doc, requestedSigs, y, colors) {
     const sigBuf = await getLeaderSignature(role);
 
     if (sigBuf) {
-      try { doc.image(sigBuf, x + sigW * 0.15, y - 24, { fit: [sigW * 0.7, 22], align: 'center', valign: 'bottom' }); } catch {}
+      try { doc.image(sigBuf, x + sigW * 0.15, y - 20, { fit: [sigW * 0.7, 20], align: 'center', valign: 'bottom' }); } catch {}
     }
 
     doc.moveTo(x + sigW * 0.15, y).lineTo(x + sigW * 0.85, y)
-      .strokeColor(colors.primary).lineWidth(0.8).stroke();
+      .strokeColor(colors.primary).lineWidth(0.5).stroke();
 
-    doc.fillColor(colors.primary).font('Helvetica-Bold').fontSize(9);
-    doc.text(leader?.name || '____________', x, y + 5, { width: sigW, align: 'center' });
+    doc.fillColor(colors.primary).font('Helvetica-Bold').fontSize(8);
+    doc.text(leader?.name || '____________', x, y + 4, { width: sigW, align: 'center' });
 
-    doc.font('Helvetica').fillColor(colors.subtext).fontSize(7);
-    doc.text(role.replace(/_/g, ' ').toUpperCase(), x, y + 19, { width: sigW, align: 'center', characterSpacing: 0.5 });
+    doc.font('Helvetica').fillColor(colors.subtext).fontSize(6);
+    doc.text(role.replace(/_/g, ' ').toUpperCase(), x, y + 16, { width: sigW, align: 'center', characterSpacing: 0.5 });
   }
 }
 
-// ==================== INVITATION ====================
+// ==================== INVITATION (A5) ====================
 async function drawInvitation(doc, card, profile, sigs) {
   const W = doc.page.width, H = doc.page.height;
-  const M = 40;
-  const NAVY = '#0f3460', GOLD = '#c9a227', CREAM = '#fef9f3', DARK = '#1e293b', SUB = '#64748b';
+  const M = 20; 
+  const BG = '#ffffff';
+  const PRIMARY = '#0f172a'; 
+  const ACCENT = '#b45309'; 
+  const SUBTEXT = '#64748b';
   const d = card.cardDetails || {};
 
-  doc.rect(0, 0, W, H).fill(CREAM);
-  doc.rect(M, M, W - M * 2, H - M * 2).strokeColor(GOLD).lineWidth(2.5).stroke();
-  doc.rect(M + 8, M + 8, W - (M + 8) * 2, H - (M + 8) * 2).strokeColor(GOLD).lineWidth(0.8).stroke();
+  doc.rect(0, 0, W, H).fill(BG);
+  doc.rect(M, M, W - M * 2, H - M * 2).strokeColor(PRIMARY).lineWidth(2).stroke();
+  doc.rect(M + 4, M + 4, W - (M + 4) * 2, H - (M + 4) * 2).strokeColor(ACCENT).lineWidth(0.5).stroke();
+  doc.rect(M + 4, M + 4, W - (M + 4) * 2, 40).fill(PRIMARY);
+  
+  doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(9);
+  doc.text((profile.name || 'CRESTED SS INVESTMENT CLUB LTD').toUpperCase(), M + 10, M + 16, { width: W - (M + 10) * 2, align: 'center', characterSpacing: 1.5 });
 
-  const corner = (cx, cy) => {
-    doc.moveTo(cx, cy - 9).lineTo(cx + 9, cy).lineTo(cx, cy + 9).lineTo(cx - 9, cy).closePath().fill(GOLD);
-  };
-  corner(M + 8, M + 8); corner(W - M - 8, M + 8);
-  corner(M + 8, H - M - 8); corner(W - M - 8, H - M - 8);
+  doc.fillColor(ACCENT).font('Times-Italic').fontSize(46);
+  doc.text('Invitation', 0, 75, { width: W, align: 'center' });
 
-  const topY = M + 50;
-  doc.moveTo(W / 2 - 55, topY).lineTo(W / 2 - 12, topY).strokeColor(GOLD).lineWidth(1.5).stroke();
-  doc.moveTo(W / 2 + 12, topY).lineTo(W / 2 + 55, topY).strokeColor(GOLD).lineWidth(1.5).stroke();
-  doc.circle(W / 2, topY, 6).fill(GOLD);
+  doc.font('Helvetica').fontSize(10).fillColor(PRIMARY);
+  doc.text('YOU ARE CORDIALLY INVITED TO ATTEND', 0, 130, { width: W, align: 'center', characterSpacing: 2 });
 
-  doc.fillColor(NAVY).font('Helvetica-Bold').fontSize(13);
-  doc.text((profile.name || 'CRESTED SS INVESTMENT CLUB LTD').toUpperCase(), M + 20, M + 65, { width: W - M * 2 - 40, align: 'center', characterSpacing: 1.2 });
-  if (profile.tagline) {
-    doc.font('Helvetica-Oblique').fontSize(9).fillColor(SUB);
-    doc.text(profile.tagline, M + 20, doc.y + 2, { width: W - M * 2 - 40, align: 'center' });
-  }
+  doc.font('Times-Bold').fontSize(26).fillColor(PRIMARY);
+  const eventTitle = (d.eventTitle || card.subject || 'GENERAL ASSEMBLY').toUpperCase();
+  doc.text(eventTitle, 30, 160, { width: W - 60, align: 'center' });
 
-  doc.fillColor(NAVY).font('Helvetica-Bold').fontSize(38);
-  doc.text('INVITATION', M, 185, { width: W - M * 2, align: 'center', characterSpacing: 6 });
+  const divY = 200;
+  doc.moveTo(60, divY).lineTo(W / 2 - 10, divY).strokeColor(ACCENT).lineWidth(1).stroke();
+  doc.moveTo(W / 2 + 10, divY).lineTo(W - 60, divY).strokeColor(ACCENT).lineWidth(1).stroke();
+  doc.save();
+  doc.translate(W / 2, divY);
+  doc.rotate(45);
+  doc.rect(-3, -3, 6, 6).fill(ACCENT);
+  doc.restore();
 
-  doc.font('Helvetica-Oblique').fontSize(12).fillColor(SUB);
-  doc.text('You are cordially invited to attend', M, 245, { width: W - M * 2, align: 'center' });
-
-  doc.fillColor(GOLD).font('Helvetica-Bold').fontSize(22);
-  doc.text((d.eventTitle || card.subject || 'GENERAL ASSEMBLY').toUpperCase(), M + 40, 285, { width: W - M * 2 - 80, align: 'center', characterSpacing: 2 });
-
-  const boxY = 355, boxH = 240;
-  doc.rect(M + 60, boxY, W - (M + 60) * 2, boxH).fill('#fff').strokeColor(GOLD).lineWidth(1).stroke();
-
-  let dy = boxY + 22;
+  let currentY = 225;
   const row = (label, value) => {
     if (!value) return;
-    doc.fillColor(SUB).font('Helvetica-Bold').fontSize(10).text(label, M + 90, dy);
-    doc.fillColor(DARK).font('Helvetica').fontSize(11).text(value, M + 220, dy, { width: W - (M + 220) - 90 });
-    dy += 26;
+    doc.font('Helvetica-Bold').fontSize(10).fillColor(SUBTEXT).text(label, W / 2 - 100, currentY, { width: 80, align: 'right' });
+    doc.font('Helvetica-Bold').fontSize(12).fillColor(PRIMARY).text(value, W / 2 + 10, currentY - 1, { width: 200 });
+    currentY += 25;
   };
-  row('DATE', d.eventDate ? fmtDate(d.eventDate) : '');
-  row('TIME', d.eventTime || '');
-  row('VENUE', d.eventVenue || '');
-  if (d.dressCode) row('DRESS CODE', d.dressCode);
-  if (d.agenda) row('AGENDA', d.agenda);
+  
+  row('DATE:', d.eventDate ? fmtDate(d.eventDate) : '');
+  row('TIME:', d.eventTime || '');
+  row('VENUE:', d.eventVenue || '');
+  
+  currentY += 15;
 
   if (d.message) {
-    doc.fillColor(DARK).font('Helvetica-Oblique').fontSize(11);
-    doc.text(d.message, M + 60, boxY + boxH + 20, { width: W - M * 2 - 120, align: 'center', lineGap: 4 });
+    doc.font('Times-Italic').fontSize(14).fillColor(PRIMARY);
+    doc.text(d.message, 50, currentY, { width: W - 100, align: 'center', lineGap: 4 });
+    currentY += doc.heightOfString(d.message, { width: W - 100 }) + 20;
   }
 
   if (d.rsvpContact) {
-    doc.fillColor(SUB).font('Helvetica').fontSize(10);
-    doc.text(`Kindly RSVP to ${d.rsvpContact}`, M, H - 160, { width: W - M * 2, align: 'center' });
+    doc.font('Helvetica').fontSize(9).fillColor(SUBTEXT).text('KINDLY RSVP', 0, H - 120, { width: W, align: 'center', characterSpacing: 1 });
+    doc.font('Helvetica-Bold').fontSize(10).fillColor(PRIMARY).text(d.rsvpContact, 0, H - 105, { width: W, align: 'center' });
   }
 
-  await drawCardSigs(doc, sigs, H - 120, { primary: NAVY, subtext: SUB });
-
-  const botY = H - M - 40;
-  doc.moveTo(W / 2 - 55, botY).lineTo(W / 2 - 12, botY).strokeColor(GOLD).lineWidth(1.5).stroke();
-  doc.moveTo(W / 2 + 12, botY).lineTo(W / 2 + 55, botY).strokeColor(GOLD).lineWidth(1.5).stroke();
-  doc.circle(W / 2, botY, 6).fill(GOLD);
+  await drawCardSigs(doc, sigs, H - 60, { primary: PRIMARY, subtext: SUBTEXT });
 }
 
-// ==================== SUCCESS ====================
+// ==================== SUCCESS (A5) ====================
 async function drawSuccess(doc, card, profile, sigs) {
   const W = doc.page.width, H = doc.page.height;
-  const M = 40;
-  const GREEN = '#15803d', GOLD = '#c9a227', BG = '#f0fdf4', DARK = '#14532d', SUB = '#166534';
+  const M = 20;
+  const BG = '#f8fafc';
+  const PRIMARY = '#064e3b';
+  const ACCENT = '#d97706';
+  const SUB = '#475569';
   const d = card.cardDetails || {};
 
   doc.rect(0, 0, W, H).fill(BG);
-  doc.rect(M, M, W - M * 2, H - M * 2).strokeColor(GOLD).lineWidth(2.5).stroke();
-  doc.rect(M + 8, M + 8, W - (M + 8) * 2, H - (M + 8) * 2).strokeColor(GREEN).lineWidth(0.8).stroke();
+  doc.rect(M, M, W - M * 2, H - M * 2).strokeColor(PRIMARY).lineWidth(2).stroke();
+  doc.rect(M + 4, M + 4, W - (M + 4) * 2, H - (M + 4) * 2).strokeColor(ACCENT).lineWidth(0.5).stroke();
 
-  doc.rect(M + 8, M + 8, W - (M + 8) * 2, 65).fill(GREEN);
-  doc.fillColor('#fff').font('Helvetica-Bold').fontSize(26);
-  doc.text('CONGRATULATIONS', 0, M + 28, { width: W, align: 'center', characterSpacing: 3 });
+  doc.rect(M + 4, M + 4, W - (M + 4) * 2, 45).fill(PRIMARY);
+  doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(18);
+  doc.text('BEST WISHES', 0, M + 18, { width: W, align: 'center', characterSpacing: 3 });
 
-  const photoY = 175, photoD = 140, photoX = M + 60;
-  const nameX = photoX + photoD + 30;
-  const nameW = W - nameX - M - 40;
-
+  const photoY = 90, photoD = 85;
   const photoBuf = await resolvePhoto(card, card.memberId, d.candidatePhoto);
   const initials = (d.candidateName || card.subjectPerson?.fullName || '?').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
-  drawCircularPhoto(doc, photoBuf, photoX + photoD / 2, photoY + photoD / 2, photoD / 2, GOLD, initials, '#dcfce7', GREEN);
+  
+  doc.circle(W / 2, photoY + photoD / 2, (photoD / 2) + 4).strokeColor(ACCENT).lineWidth(1.5).stroke();
+  drawCircularPhoto(doc, photoBuf, W / 2, photoY + photoD / 2, photoD / 2, PRIMARY, initials, '#dcfce7', PRIMARY);
 
-  doc.fillColor(DARK).font('Helvetica-Bold').fontSize(24);
-  doc.text((d.candidateName || card.subjectPerson?.fullName || 'CANDIDATE').toUpperCase(), nameX, photoY + 30, { width: nameW });
-
-  if (d.examName) {
-    doc.fillColor(GOLD).font('Helvetica-Bold').fontSize(13);
-    doc.text(d.examName.toUpperCase(), nameX, doc.y + 6, { width: nameW });
-  }
-  if (d.schoolName) {
-    doc.fillColor(SUB).font('Helvetica-Oblique').fontSize(11);
-    doc.text(d.schoolName, nameX, doc.y + 4, { width: nameW });
-  }
-  if (d.resultDetails) {
-    doc.fillColor(SUB).font('Helvetica').fontSize(10);
-    doc.text(d.resultDetails, nameX, doc.y + 8, { width: nameW });
+  let currentY = 195;
+  if (d.relationship && d.relationship !== 'self') {
+    const memName = card.subjectPerson?.fullName || 'MEMBER';
+    doc.fillColor(SUB).font('Helvetica-Bold').fontSize(10);
+    doc.text(`${memName.toUpperCase()}'S ${d.relationship.toUpperCase()}`, 20, currentY, { width: W - 40, align: 'center', characterSpacing: 1 });
+    currentY += 18;
   }
 
-  const divY = photoY + photoD + 30;
-  doc.moveTo(M + 60, divY).lineTo(W - M - 60, divY).strokeColor(GOLD).lineWidth(1.5).stroke();
+  doc.fillColor(PRIMARY).font('Times-Bold').fontSize(22);
+  doc.text((d.candidateName || 'CANDIDATE').toUpperCase(), 20, currentY, { width: W - 40, align: 'center' });
 
-  doc.fillColor(DARK).font('Helvetica').fontSize(12);
-  doc.text(d.message || '', M + 60, divY + 25, { width: W - M * 2 - 120, align: 'justify', lineGap: 5 });
+  currentY += 30;
+  if (d.examLevel) {
+    doc.fillColor(ACCENT).font('Helvetica-Bold').fontSize(11);
+    doc.text(`SITTING FOR: ${d.examLevel.toUpperCase()}`, 20, currentY, { width: W - 40, align: 'center', characterSpacing: 1 });
+    currentY += 20;
+  }
 
-  let cy = doc.y + 20;
-  cy = drawContributionBox(doc, d.contributionAmount, cy, W, { bg: '#ecfdf5', primary: GREEN, subtext: SUB });
+  currentY += 10;
+  if (d.message) {
+    doc.fillColor(PRIMARY).font('Times-Italic').fontSize(13);
+    doc.text(d.message, 40, currentY, { width: W - 80, align: 'center', lineGap: 5 });
+  }
 
-  await drawCardSigs(doc, sigs, Math.max(cy + 60, H - 130), { primary: GREEN, subtext: SUB });
+  await drawCardSigs(doc, sigs, H - 65, { primary: PRIMARY, subtext: SUB });
 
-  doc.fillColor(SUB).font('Helvetica').fontSize(8);
-  doc.text((profile.name || 'CRESTED SS INVESTMENT CLUB LTD').toUpperCase(), M, H - M - 25, { width: W - M * 2, align: 'center', characterSpacing: 0.6 });
+  doc.fillColor(SUB).font('Helvetica').fontSize(6);
+  doc.text((profile.name || 'CRESTED SS INVESTMENT CLUB LTD').toUpperCase(), M, H - M - 15, { width: W - M * 2, align: 'center', characterSpacing: 0.5 });
 }
 
-// ==================== WEDDING ====================
+// ==================== WEDDING (A5 Premium) ====================
 async function drawWedding(doc, card, profile, sigs) {
   const W = doc.page.width, H = doc.page.height;
-  const M = 40;
-  const ROSE = '#be185d', GOLD = '#c9a227', BG = '#fdf4f7', DARK = '#831843', SUB = '#9d174d';
+  const M = 20;
+  const BG = '#fffafa'; 
+  const PRIMARY = '#831843'; 
+  const ACCENT = '#c9a227'; 
+  const SUB = '#64748b';
   const d = card.cardDetails || {};
 
   doc.rect(0, 0, W, H).fill(BG);
-  doc.rect(M, M, W - M * 2, H - M * 2).strokeColor(GOLD).lineWidth(2.5).stroke();
-  doc.rect(M + 8, M + 8, W - (M + 8) * 2, H - (M + 8) * 2).strokeColor(ROSE).lineWidth(0.8).stroke();
+  
+  doc.rect(M, M, W - M * 2, H - M * 2).strokeColor(ACCENT).lineWidth(2).stroke();
+  doc.rect(M + 5, M + 5, W - (M + 5) * 2, H - (M + 5) * 2).strokeColor(PRIMARY).lineWidth(0.5).stroke();
 
-  const topY = M + 50;
-  const drawHeart = (cx, cy, s, color) => {
-    doc.save();
-    doc.moveTo(cx, cy + s * 0.3)
-      .bezierCurveTo(cx + s, cy - s * 0.3, cx + s, cy + s * 0.7, cx, cy + s * 1.3)
-      .bezierCurveTo(cx - s, cy + s * 0.7, cx - s, cy - s * 0.3, cx, cy + s * 0.3)
-      .fill(color);
-    doc.restore();
-  };
-  drawHeart(W / 2 - 18, topY - 8, 8, ROSE);
-  drawHeart(W / 2 + 18, topY - 8, 8, GOLD);
+  // Club Name Header
+  doc.fillColor(PRIMARY).font('Helvetica-Bold').fontSize(9);
+  doc.text((profile.name || 'CRESTED SS INVESTMENT CLUB LTD').toUpperCase(), 20, 35, { width: W - 40, align: 'center', characterSpacing: 1.5 });
 
-  doc.fillColor(ROSE).font('Helvetica-Bold').fontSize(12);
-  doc.text((profile.name || 'CRESTED SS INVESTMENT CLUB LTD').toUpperCase(), M, topY + 20, { width: W - M * 2, align: 'center', characterSpacing: 1 });
-
-  doc.fillColor(SUB).font('Helvetica-Oblique').fontSize(11);
-  doc.text('Together with their families', M, topY + 50, { width: W - M * 2, align: 'center' });
-
-  // Optional couple photo
-  const photoBuf = await resolvePhoto(card, card.memberId, d.couplePhoto);
-  const hasPhoto = !!photoBuf;
-  const photoR = 50;
-  const photoCy = 200;
-
-  if (hasPhoto) {
-    drawCircularPhoto(doc, photoBuf, W / 2, photoCy, photoR, GOLD, '', '#fdf4f7', ROSE);
+  // Relationship Tag (e.g. DAUGHTER OF KABENGE SAMUEL)
+  let yOffset = 60;
+  if (d.weddingRelationship && d.weddingRelationship !== 'self' && d.weddingRelationship !== 'none' && card.subjectPerson?.fullName) {
+    doc.fillColor(SUB).font('Helvetica-Bold').fontSize(9);
+    doc.text(`${d.weddingRelationship.toUpperCase()} OF ${card.subjectPerson.fullName.toUpperCase()}`, 20, yOffset, { width: W - 40, align: 'center', characterSpacing: 1 });
+    yOffset += 15;
   }
 
-  const namesY = hasPhoto ? photoCy + photoR + 15 : 180;
+  const photoBuf = await resolvePhoto(card, card.memberId, d.couplePhoto);
+  const hasPhoto = !!photoBuf;
+  let namesY = yOffset + 5;
+  
+  if (hasPhoto) {
+    const photoR = 50;
+    drawCircularPhoto(doc, photoBuf, W / 2, yOffset + 10 + photoR, photoR, ACCENT, '', '#fdf4f7', PRIMARY);
+    namesY = yOffset + 10 + photoR * 2 + 15;
+  }
 
-  doc.fillColor(ROSE).font('Helvetica-Bold').fontSize(28);
-  doc.text((d.groomName || 'GROOM').toUpperCase(), M, namesY, { width: W - M * 2, align: 'center', characterSpacing: 2 });
-  doc.fillColor(GOLD).font('Helvetica-Bold').fontSize(30);
-  doc.text('&', M, namesY + 45, { width: W - M * 2, align: 'center' });
-  doc.fillColor(ROSE).font('Helvetica-Bold').fontSize(28);
-  doc.text((d.brideName || 'BRIDE').toUpperCase(), M, namesY + 90, { width: W - M * 2, align: 'center', characterSpacing: 2 });
+  doc.fillColor(PRIMARY).font('Times-Bold').fontSize(24);
+  doc.text((d.groomName || 'GROOM').toUpperCase(), 20, namesY, { width: W - 40, align: 'center' });
+  
+  doc.fillColor(ACCENT).font('Times-Italic').fontSize(28);
+  doc.text('&', 20, namesY + 30, { width: W - 40, align: 'center' });
+  
+  doc.fillColor(PRIMARY).font('Times-Bold').fontSize(24);
+  doc.text((d.brideName || 'BRIDE').toUpperCase(), 20, namesY + 65, { width: W - 40, align: 'center' });
 
-  doc.fillColor(SUB).font('Helvetica-Oblique').fontSize(11);
-  doc.text('request the pleasure of your company at their wedding ceremony', M + 60, namesY + 155, { width: W - M * 2 - 120, align: 'center' });
+  // Club Pledge / Contribution instead of "request the pleasure..."
+  let pledgeText = 'request the pleasure of your company at their wedding ceremony';
+  if (d.contributionAmount) {
+    pledgeText = `The Club pledges a contribution of UGX ${Number(d.contributionAmount).toLocaleString()} to support this joyous occasion.`;
+  }
 
-  const boxY = namesY + 195, boxH = 190;
-  doc.rect(M + 60, boxY, W - (M + 60) * 2, boxH).fill('#fff').strokeColor(GOLD).lineWidth(1).stroke();
+  doc.fillColor(SUB).font('Helvetica').fontSize(10);
+  doc.text(pledgeText, 30, namesY + 105, { width: W - 60, align: 'center' });
 
-  let dy = boxY + 22;
+  const boxY = namesY + 135;
+  doc.rect(40, boxY, W - 80, 115).fill('#ffffff').strokeColor(ACCENT).lineWidth(1).stroke();
+
+  let dy = boxY + 15;
   const row = (label, value) => {
     if (!value) return;
-    doc.fillColor(SUB).font('Helvetica-Bold').fontSize(10).text(label, M + 90, dy);
-    doc.fillColor(DARK).font('Helvetica').fontSize(11).text(value, M + 220, dy, { width: W - (M + 220) - 90 });
-    dy += 26;
+    doc.fillColor(SUB).font('Helvetica-Bold').fontSize(8).text(label, 55, dy);
+    doc.fillColor(PRIMARY).font('Helvetica-Bold').fontSize(9).text(value, 120, dy, { width: W - 160 });
+    dy += 18;
   };
   row('DATE', d.weddingDate ? fmtDate(d.weddingDate) : '');
   row('TIME', d.weddingTime || '');
   row('VENUE', d.weddingVenue || '');
   if (d.receptionVenue) row('RECEPTION', d.receptionVenue);
-  if (d.dressCode) row('DRESS CODE', d.dressCode);
 
-  let cy = boxY + boxH + 15;
-
+  let cy = boxY + 130;
   if (d.message) {
-    doc.fillColor(DARK).font('Helvetica').fontSize(11);
-    doc.text(d.message, M + 60, cy, { width: W - M * 2 - 120, align: 'justify', lineGap: 4 });
+    doc.fillColor(PRIMARY).font('Times-Italic').fontSize(11);
+    doc.text(d.message, 40, cy, { width: W - 80, align: 'center', lineGap: 3 });
     cy = doc.y + 15;
   }
 
-  cy = drawContributionBox(doc, d.contributionAmount, cy, W, { bg: '#fdf2f8', primary: ROSE, subtext: SUB });
-
-  await drawCardSigs(doc, sigs, Math.max(cy + 50, H - 130), { primary: ROSE, subtext: SUB });
+  await drawCardSigs(doc, sigs, H - 60, { primary: PRIMARY, subtext: SUB });
 }
 
-// ==================== INTRODUCTION ====================
+// ==================== INTRODUCTION (A5 Premium) ====================
 async function drawIntroduction(doc, card, profile, sigs) {
   const W = doc.page.width, H = doc.page.height;
-  const M = 40;
-  const BROWN = '#78350f', AMBER = '#d97706', BG = '#fef9e7', DARK = '#451a03', SUB = '#92400e';
+  const M = 20;
+  const BG = '#fef9e7'; 
+  const PRIMARY = '#78350f'; 
+  const ACCENT = '#d97706'; 
+  const SUB = '#92400e';
   const d = card.cardDetails || {};
 
   doc.rect(0, 0, W, H).fill(BG);
-  doc.rect(M, M, W - M * 2, H - M * 2).strokeColor(BROWN).lineWidth(3).stroke();
-  doc.rect(M + 8, M + 8, W - (M + 8) * 2, H - (M + 8) * 2).strokeColor(AMBER).lineWidth(1).stroke();
+  
+  doc.rect(M, M, W - M * 2, H - M * 2).strokeColor(ACCENT).lineWidth(2).stroke();
+  doc.rect(M + 5, M + 5, W - (M + 5) * 2, H - (M + 5) * 2).strokeColor(PRIMARY).lineWidth(0.5).stroke();
 
-  const bandY = M + 50;
-  for (let i = 0; i < 15; i++) {
-    const x = M + 30 + i * 35;
-    doc.moveTo(x, bandY - 5).lineTo(x + 17, bandY + 3).lineTo(x + 35, bandY - 5).strokeColor(AMBER).lineWidth(1.2).stroke();
+  // Club Name Header
+  doc.fillColor(PRIMARY).font('Helvetica-Bold').fontSize(9);
+  doc.text((profile.name || 'CRESTED SS INVESTMENT CLUB LTD').toUpperCase(), 20, 35, { width: W - 40, align: 'center', characterSpacing: 1.5 });
+
+  // Relationship Tag
+  let yOffset = 60;
+  if (d.weddingRelationship && d.weddingRelationship !== 'self' && d.weddingRelationship !== 'none' && card.subjectPerson?.fullName) {
+    doc.fillColor(SUB).font('Helvetica-Bold').fontSize(9);
+    doc.text(`${d.weddingRelationship.toUpperCase()} OF ${card.subjectPerson.fullName.toUpperCase()}`, 20, yOffset, { width: W - 40, align: 'center', characterSpacing: 1 });
+    yOffset += 15;
   }
 
-  doc.fillColor(BROWN).font('Helvetica-Bold').fontSize(13);
-  doc.text((profile.name || 'CRESTED SS INVESTMENT CLUB LTD').toUpperCase(), M + 20, M + 75, { width: W - M * 2 - 40, align: 'center', characterSpacing: 1.2 });
-
+  // Couple Photo
   const photoBuf = await resolvePhoto(card, card.memberId, d.couplePhoto);
   const hasPhoto = !!photoBuf;
-  const photoR = 48;
-  const photoCy = 175;
-
+  let namesY = yOffset + 5;
+  
   if (hasPhoto) {
-    drawCircularPhoto(doc, photoBuf, W / 2, photoCy, photoR, AMBER, '', '#fef9e7', BROWN);
+    const photoR = 45;
+    drawCircularPhoto(doc, photoBuf, W / 2, yOffset + 10 + photoR, photoR, ACCENT, '', '#fef9e7', PRIMARY);
+    namesY = yOffset + 10 + photoR * 2 + 15;
   }
 
-  const namesY = hasPhoto ? photoCy + photoR + 12 : 160;
+  doc.fillColor(PRIMARY).font('Helvetica-Bold').fontSize(12);
+  doc.text('INTRODUCTION CEREMONY', 20, namesY, { width: W - 40, align: 'center', characterSpacing: 2 });
+  namesY += 20;
 
-  doc.fillColor(BROWN).font('Helvetica-Bold').fontSize(15);
-  doc.text('INTRODUCTION CEREMONY', M, namesY, { width: W - M * 2, align: 'center', characterSpacing: 4 });
+  // Couple Names
+  doc.fillColor(PRIMARY).font('Times-Bold').fontSize(22);
+  doc.text((d.groomName || 'GROOM').toUpperCase(), 20, namesY, { width: W - 40, align: 'center' });
+  
+  doc.fillColor(ACCENT).font('Times-Italic').fontSize(26);
+  doc.text('&', 20, namesY + 25, { width: W - 40, align: 'center' });
+  
+  doc.fillColor(PRIMARY).font('Times-Bold').fontSize(22);
+  doc.text((d.brideName || 'BRIDE').toUpperCase(), 20, namesY + 55, { width: W - 40, align: 'center' });
 
-  doc.fillColor(AMBER).font('Helvetica-Oblique').fontSize(11);
-  doc.text('of', M, namesY + 35, { width: W - M * 2, align: 'center' });
-
-  doc.fillColor(BROWN).font('Helvetica-Bold').fontSize(26);
-  doc.text((d.groomName || 'GROOM').toUpperCase(), M, namesY + 70, { width: W - M * 2, align: 'center', characterSpacing: 2 });
-  doc.fillColor(AMBER).font('Helvetica-Bold').fontSize(28);
-  doc.text('&', M, namesY + 110, { width: W - M * 2, align: 'center' });
-  doc.fillColor(BROWN).font('Helvetica-Bold').fontSize(26);
-  doc.text((d.brideName || 'BRIDE').toUpperCase(), M, namesY + 150, { width: W - M * 2, align: 'center', characterSpacing: 2 });
-
-  if (d.families) {
-    doc.fillColor(SUB).font('Helvetica-Oblique').fontSize(11);
-    doc.text(d.families, M + 60, namesY + 200, { width: W - M * 2 - 120, align: 'center' });
+  // Families (Split left and right)
+  let familyY = namesY + 90;
+  if (d.groomFamily || d.brideFamily) {
+    doc.fillColor(SUB).font('Helvetica-Oblique').fontSize(10);
+    
+    if (d.groomFamily) {
+      doc.text(d.groomFamily, 40, familyY, { width: (W / 2) - 50, align: 'right' });
+    }
+    if (d.brideFamily) {
+      doc.text(d.brideFamily, W / 2 + 10, familyY, { width: (W / 2) - 50, align: 'left' });
+    }
+    
+    // "&" in the middle
+    doc.fillColor(ACCENT).font('Helvetica-Bold').fontSize(10);
+    doc.text('&', W / 2 - 10, familyY, { width: 20, align: 'center' });
+    
+    familyY += 20;
   }
 
-  const boxY = namesY + 240, boxH = 155;
-  doc.rect(M + 60, boxY, W - (M + 60) * 2, boxH).fill('#fff').strokeColor(AMBER).lineWidth(1).stroke();
+  // Club Pledge
+  if (d.contributionAmount) {
+    doc.fillColor(SUB).font('Helvetica').fontSize(9);
+    doc.text(`The Club pledges a contribution of UGX ${Number(d.contributionAmount).toLocaleString()} to support this joyous occasion.`, 30, familyY, { width: W - 60, align: 'center' });
+    familyY += 20;
+  }
 
-  let dy = boxY + 22;
+  const boxY = familyY + 10;
+  // Soft faded white box (matching wedding style)
+  doc.rect(40, boxY, W - 80, 95).fill('#fffaf0').strokeColor(ACCENT).lineWidth(1).stroke();
+
+  let dy = boxY + 15;
   const row = (label, value) => {
     if (!value) return;
-    doc.fillColor(SUB).font('Helvetica-Bold').fontSize(10).text(label, M + 90, dy);
-    doc.fillColor(DARK).font('Helvetica').fontSize(11).text(value, M + 220, dy, { width: W - (M + 220) - 90 });
-    dy += 26;
+    doc.fillColor(SUB).font('Helvetica-Bold').fontSize(8).text(label, 55, dy);
+    doc.fillColor(PRIMARY).font('Helvetica-Bold').fontSize(9).text(value, 120, dy, { width: W - 160 });
+    dy += 18;
   };
   row('DATE', d.introductionDate ? fmtDate(d.introductionDate) : '');
+  row('TIME', d.introductionTime || '');
   row('VENUE', d.introductionVenue || '');
   if (d.dressCode) row('DRESS CODE', d.dressCode);
 
-  let cy = boxY + boxH + 12;
-
+  let cy = boxY + 110;
   if (d.message) {
-    doc.fillColor(DARK).font('Helvetica').fontSize(10);
-    doc.text(d.message, M + 60, cy, { width: W - M * 2 - 120, align: 'justify', lineGap: 4 });
-    cy = doc.y + 12;
+    doc.fillColor(PRIMARY).font('Times-Italic').fontSize(11);
+    doc.text(d.message, 40, cy, { width: W - 80, align: 'center', lineGap: 3 });
   }
 
-  cy = drawContributionBox(doc, d.contributionAmount, cy, W, { bg: '#fffbeb', primary: BROWN, subtext: SUB });
-
-  await drawCardSigs(doc, sigs, Math.max(cy + 50, H - 120), { primary: BROWN, subtext: SUB });
+  await drawCardSigs(doc, sigs, H - 60, { primary: PRIMARY, subtext: SUB });
 }
 
-// ==================== CONDOLENCE ====================
+// ==================== CONDOLENCE (A5 Premium) ====================
 async function drawCondolence(doc, card, profile, sigs) {
   const W = doc.page.width, H = doc.page.height;
-  const M = 40;
-  const INK = '#1e293b', GOLD = '#94a3b8', BG = '#fafaf7', DARK = '#0f172a', SUB = '#475569';
+  const M = 20;
+  const BG = '#0a192f';
+  const GOLD = '#d4af37';
+  const CREAM = '#f8fafc';
   const d = card.cardDetails || {};
 
   doc.rect(0, 0, W, H).fill(BG);
-  doc.rect(M, M, W - M * 2, H - M * 2).strokeColor(INK).lineWidth(3).stroke();
-  doc.rect(M + 10, M + 10, W - (M + 10) * 2, H - (M + 10) * 2).strokeColor(GOLD).lineWidth(0.8).stroke();
 
-  const symY = 95;
-  doc.moveTo(W / 2, symY).lineTo(W / 2, symY + 40).strokeColor(INK).lineWidth(2.5).stroke();
-  doc.moveTo(W / 2 - 15, symY + 15).lineTo(W / 2 + 15, symY + 15).strokeColor(INK).lineWidth(2.5).stroke();
+  doc.rect(M, M, W - M * 2, H - M * 2).strokeColor(GOLD).lineWidth(2).stroke();
+  doc.rect(M + 5, M + 5, W - (M + 5) * 2, H - (M + 5) * 2).strokeColor(GOLD).lineWidth(0.5).stroke();
 
-  doc.fillColor(INK).font('Helvetica-Bold').fontSize(11);
-  doc.text((profile.name || 'CRESTED SS INVESTMENT CLUB LTD').toUpperCase(), M, 155, { width: W - M * 2, align: 'center', characterSpacing: 1 });
+  doc.fillColor(GOLD).font('Times-Roman').fontSize(30);
+  doc.text('†', 0, 40, { width: W, align: 'center' });
 
-  doc.fillColor(DARK).font('Helvetica-Bold').fontSize(24);
-  doc.text(d.title || 'IN LOVING MEMORY', M, 195, { width: W - M * 2, align: 'center', characterSpacing: 4 });
+  doc.fillColor(CREAM).font('Times-Roman').fontSize(12);
+  doc.text('With Deep Sorrow We Announce', 0, 85, { width: W, align: 'center' });
+  doc.text('The Passing Of', 0, 100, { width: W, align: 'center' });
 
-  // Photo (deceased) — only if provided
+  doc.fillColor(GOLD).font('Times-Bold').fontSize(20);
+  doc.text((d.deceasedName || 'BELOVED MEMBER').toUpperCase(), 20, 125, { width: W - 40, align: 'center' });
+
+  const photoY = 160, photoD = 130;
   const photoBuf = await resolvePhoto(card, card.memberId, d.deceasedPhoto);
-  const hasPhoto = !!photoBuf;
-  let afterPhotoY = 245;
+  const initials = (d.deceasedName || '?').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+  
+  doc.circle(W / 2, photoY + photoD / 2, (photoD / 2) + 3).strokeColor(GOLD).lineWidth(1).stroke();
+  drawCircularPhoto(doc, photoBuf, W / 2, photoY + photoD / 2, photoD / 2, GOLD, initials, BG, CREAM);
 
-  if (hasPhoto) {
-    const photoR = 55;
-    const photoCy = 290;
-    drawCircularPhoto(doc, photoBuf, W / 2, photoCy, photoR, GOLD, '', '#e2e8f0', INK);
-    afterPhotoY = photoCy + photoR + 15;
-  }
-
-  if (d.deceasedName) {
-    doc.fillColor(INK).font('Helvetica-Bold').fontSize(20);
-    doc.text(d.deceasedName.toUpperCase(), M, afterPhotoY, { width: W - M * 2, align: 'center', characterSpacing: 1.5 });
-    afterPhotoY = doc.y + 6;
-  }
+  let currentY = 310;
   if (d.lifeDates) {
-    doc.fillColor(SUB).font('Helvetica-Oblique').fontSize(12);
-    doc.text(d.lifeDates, M, afterPhotoY, { width: W - M * 2, align: 'center' });
-    afterPhotoY = doc.y + 6;
+    doc.fillColor(GOLD).font('Times-Italic').fontSize(14);
+    doc.text(d.lifeDates, 20, currentY, { width: W - 40, align: 'center' });
+    currentY += 25;
   }
 
-  const divY = afterPhotoY + 15;
-  doc.moveTo(W / 2 - 90, divY).lineTo(W / 2 + 90, divY).strokeColor(GOLD).lineWidth(1).stroke();
+  doc.fillColor(CREAM).font('Times-Bold').fontSize(16);
+  doc.text('Rest In Eternal Peace', 20, currentY, { width: W - 40, align: 'center' });
+  currentY += 25;
 
-  doc.fillColor(INK).font('Helvetica').fontSize(12);
-  doc.text(d.message || '', M + 70, divY + 25, { width: W - M * 2 - 140, align: 'justify', lineGap: 6 });
+  doc.fillColor(CREAM).font('Times-Roman').fontSize(10);
+  if (d.condolenceCase === 'member_lost_loved_one' && d.relativeRelationship) {
+    doc.text(`Beloved ${d.relativeRelationship.charAt(0).toUpperCase() + d.relativeRelationship.slice(1)}`, 20, currentY, { width: W - 40, align: 'center' });
+  } else {
+    doc.text(`Late Member`, 20, currentY, { width: W - 40, align: 'center' });
+  }
+  currentY += 20;
 
-  let cy = doc.y + 15;
-  cy = drawContributionBox(doc, d.contributionAmount, cy, W, { bg: '#f1f5f9', primary: INK, subtext: SUB });
+  if (d.funeralDate) {
+    doc.fillColor(GOLD).font('Times-Bold').fontSize(11);
+    doc.text(`Burial: ${fmtDate(d.funeralDate)}`, 20, currentY, { width: W - 40, align: 'center' });
+    currentY += 16;
+  }
+  if (d.funeralVenue) {
+    doc.fillColor(CREAM).font('Times-Roman').fontSize(10);
+    doc.text(`Venue: ${d.funeralVenue}`, 20, currentY, { width: W - 40, align: 'center' });
+    currentY += 20;
+  }
 
-  await drawCardSigs(doc, sigs, Math.max(cy + 50, H - 130), { primary: INK, subtext: SUB });
+  doc.moveTo(W / 2 - 60, currentY).lineTo(W / 2 + 60, currentY).strokeColor(GOLD).lineWidth(0.5).stroke();
+  currentY += 15;
 
-  doc.moveTo(M + 20, H - M - 25).lineTo(W - M - 20, H - M - 25).strokeColor(GOLD).lineWidth(0.5).stroke();
+  if (d.message) {
+    doc.fillColor(CREAM).font('Times-Italic').fontSize(10);
+    doc.text(d.message, 30, currentY, { width: W - 60, align: 'center', lineGap: 3 });
+  }
+
+  await drawCardSigs(doc, sigs, H - 50, { primary: GOLD, subtext: CREAM });
 }
 
 // ==================== MAIN ====================
 async function generateCardPDF(card, res, requestedSigs = []) {
   try {
     setPdfHeaders(res, (card.referenceNumber || 'card').replace(/\//g, '-'));
-    const doc = new PDFDocument({ size: 'A4', margin: 0 });
+    const doc = new PDFDocument({ size: [420, 595], margin: 0 });
     doc.pipe(res);
     const profile = (await ClubProfile.findOne()) || {};
 

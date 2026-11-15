@@ -61,12 +61,14 @@ function buildDefaultCardMessage(type, details, member) {
     const condCase = d.condolenceCase || 'club_lost_member';
 
     if (condCase === 'member_lost_loved_one') {
-      const rel = (d.relationship || 'loved one').trim();
+      // FIX: Use relativeRelationship (Father, Mother, etc.) instead of old relationship field
+      const rel = (d.relativeRelationship || 'loved one').trim();
       const dec = (d.deceasedName || '').trim();
-      const relStr = dec ? `${rel}, ${dec}` : rel;
+      
       let msg = memberRef
-        ? `The Club extends its sincere condolences to ${memberRef}, our member, on the loss of their beloved ${relStr}.`
-        : `The Club extends its sincere condolences on the loss of a beloved ${relStr}.`;
+        ? `The Club extends its sincere condolences to ${memberRef} and family, on the loss of their beloved ${rel}, ${dec}.`
+        : `The Club extends its sincere condolences on the loss of a beloved ${rel}, ${dec}.`;
+      
       if (amountStr) msg += ` The Club has contributed ${amountStr} to help in the burial arrangements.`;
       msg += ` May the Almighty grant you and your family strength, comfort, and peace during this difficult time.`;
       return msg;
@@ -102,14 +104,15 @@ function buildDefaultCardMessage(type, details, member) {
   }
 
   if (type === 'success') {
-    const candidate = (d.candidateName || memberName || 'our candidate').trim();
-    const achievement = d.examName
-      ? `passing ${d.examName}${d.schoolName ? ` at ${d.schoolName}` : ''}`
-      : 'this outstanding achievement';
-    let msg = `The Club congratulates ${candidate} on ${achievement}.`;
-    if (amountStr) msg += ` The Club has contributed ${amountStr} in recognition of this milestone.`;
-    msg += ` May this success mark the beginning of many more achievements to come. Continue to shine!`;
-    return msg;
+    const candidate = (d.candidateName || 'our candidate').trim();
+    const rel = (d.relationship || '').toLowerCase();
+    const exam = d.examLevel ? `your upcoming ${d.examLevel} exams` : 'your upcoming exams';
+    
+    if (rel && rel !== 'self' && memberName) {
+      return `The Club wishes ${memberName.toUpperCase()}'S ${rel.toUpperCase()}, ${candidate}, the very best of luck in ${exam}. We are confident in your abilities, and we look forward to celebrating your success. Go and shine!`;
+    } else {
+      return `The Club wishes ${candidate} the very best of luck in ${exam}. We are confident in your abilities, and we look forward to celebrating your success. Go and shine!`;
+    }
   }
 
   if (type === 'invitation') {
@@ -231,13 +234,13 @@ async function buildCardContent(payload) {
 
   const details = { ...(cardDetails || {}) };
 
-  // Auto-fill deceased name & photo from member if club lost member and not typed
+  // CONDOLENCE auto-fill
   if (type === 'condolence' && details.condolenceCase !== 'member_lost_loved_one' && member) {
     if (!details.deceasedName) details.deceasedName = `${member.firstName} ${member.surname}`;
     if (!details.deceasedPhoto && member.photo) details.deceasedPhoto = member.photo;
   }
 
-  // Auto-fill couple names if member linked and field empty
+  // WEDDING/INTRODUCTION auto-fill
   if ((type === 'wedding' || type === 'introduction') && member) {
     const fullName = `${member.firstName} ${member.surname}`;
     if (!details.groomName && !details.brideName) {
@@ -245,13 +248,15 @@ async function buildCardContent(payload) {
     }
   }
 
-  // Auto-fill candidate name/photo from member for success
+  // SUCCESS: Only auto-fill if relationship is 'self'. If it's son/daughter, respect the user's typed name.
   if (type === 'success' && member) {
-    if (!details.candidateName) details.candidateName = `${member.firstName} ${member.surname}`;
-    if (!details.candidatePhoto && member.photo) details.candidatePhoto = member.photo;
+    if (details.relationship === 'self') {
+      if (!details.candidateName) details.candidateName = `${member.firstName} ${member.surname}`;
+      if (!details.candidatePhoto && member.photo) details.candidatePhoto = member.photo;
+    }
   }
 
-  // Build default message if none provided
+  // Build default message
   if (!details.message || !details.message.trim()) {
     details.message = buildDefaultCardMessage(type, details, member);
   }

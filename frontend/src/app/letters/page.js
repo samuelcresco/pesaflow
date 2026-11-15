@@ -13,7 +13,7 @@ const LETTER_TYPES = {
 
 const CARD_TYPES = {
   invitation: { label: '🎉 Invitation', color: '#0f3460', bg: '#fef9f3', desc: 'Club functions & GA' },
-  success: { label: '🏆 Success Card', color: '#15803d', bg: '#f0fdf4', desc: 'Celebrate candidates' },
+  success: { label: '🏆 Success Card', color: '#15803d', bg: '#f0fdf4', desc: 'Wish them luck in exams' },
   wedding: { label: '💍 Wedding', color: '#be185d', bg: '#fdf4f7', desc: 'Congratulate couples' },
   introduction: { label: '🎊 Introduction', color: '#78350f', bg: '#fef9e7', desc: 'Traditional ceremony' },
   condolence: { label: '🕊️ Condolence', color: '#1e293b', bg: '#f1f5f9', desc: 'Express sympathy' }
@@ -62,12 +62,13 @@ export default function LettersPage() {
   const emptyCardForm = {
     type: 'invitation', subject: '', memberId: '',
     eventTitle: '', eventDate: '', eventTime: '', eventVenue: '', dressCode: '', agenda: '', rsvpContact: '',
-    candidateName: '', candidatePhoto: '', examName: '', schoolName: '', resultDetails: '',
+    candidateName: '', candidatePhoto: '', relationship: 'self', examLevel: 'UCE',
     brideName: '', groomName: '', weddingDate: '', weddingTime: '', weddingVenue: '', receptionVenue: '', couplePhoto: '',
-    introductionDate: '', introductionVenue: '', families: '',
-    condolenceCase: 'club_lost_member', deceasedName: '', relationship: '', lifeDates: '',
-    deceasedPhoto: '', funeralDate: '', funeralVenue: '',
-    contributionAmount: '', message: ''
+    weddingRelationship: 'self', contributionAmount: '',
+    introductionDate: '', introductionTime: '', introductionVenue: '', families: '', groomFamily: '', brideFamily: '',
+    condolenceCase: 'club_lost_member', deceasedName: '', lifeDates: '',
+    deceasedPhoto: '', funeralDate: '', funeralVenue: '', relativeRelationship: 'father',
+    message: ''
   };
   const [cardForm, setCardForm] = useState(emptyCardForm);
 
@@ -136,10 +137,17 @@ export default function LettersPage() {
       return { name: selectedLeader.name, title: selectedLeader.memberNumber ? `Member No: ${selectedLeader.memberNumber}` : '', organization: '', address: selectedLeader.address || '', salutation: `Dear ${selectedLeader.name},` };
     }
     if ((letterForm.type === 'recommendation' || letterForm.type === 'good_standing') && selectedPerson) {
-      return { name: '', title: '', organization: '', address: '', salutation: 'To Whom It May Concern' };
+      const hasDest = letterForm.ovOrg || letterForm.ovAddress;
+      return { 
+        name: '', 
+        title: '', 
+        organization: letterForm.ovOrg || '', 
+        address: letterForm.ovAddress || '', 
+        salutation: letterForm.ovSalutation || (hasDest ? 'Dear Sir/Madam,' : 'To Whom It May Concern') 
+      };
     }
     return { name: '', title: '', organization: '', address: '', salutation: 'Dear Sir/Madam' };
-  }, [letterForm.type, selectedLeader, selectedPerson]);
+  }, [letterForm.type, selectedLeader, selectedPerson, letterForm.ovOrg, letterForm.ovAddress, letterForm.ovSalutation]);
 
   const finalRecipient = useMemo(() => {
     const hasOverride = letterForm.ovName || letterForm.ovTitle || letterForm.ovOrg || letterForm.ovAddress || letterForm.ovSalutation;
@@ -163,53 +171,72 @@ export default function LettersPage() {
 
   const templateBody = (type, person, reason) => {
     if (!person) return [''];
+    
+    const isLeader = !!person.isLeader;
+    const hasShares = Number(person.totalShares) > 0;
+    const isMember = !!person.memberNumber;
+    
+    const parts = [];
+    if (isMember) parts.push('member');
+    if (hasShares) parts.push('shareholder');
+    if (isLeader) parts.push('leader');
+    
+    let designation = 'member';
+    if (parts.length === 1) designation = parts[0];
+    else if (parts.length === 2) designation = parts.join(' and ');
+    else if (parts.length === 3) designation = parts[0] + ', ' + parts[1] + ', and ' + parts[2];
+
     if (type === 'appointment') {
       const roleLabel = person.role.replace(/_/g, ' ').toUpperCase();
       const duties = ROLE_DUTIES[person.role] || 'discharging the duties of your office as prescribed by the Constitution';
-      const termClause = (letterForm.termStart && letterForm.termEnd)
-        ? `for a term commencing ${fmtDate(letterForm.termStart)} and ending ${fmtDate(letterForm.termEnd)}`
-        : 'for a term of two (2) years effective from the date of this letter';
       return [
-        `We, the shareholders and members of CRESTED SS INVESTMENT CLUB LTD, in accordance with the Club Constitution, hereby appoint ${person.name}${person.memberNumber ? ` (Member No. ${person.memberNumber})` : ''} as ${roleLabel} of the Club, ${termClause}.`,
+        `We, the shareholders and members of CRESTED SS INVESTMENT CLUB LTD, in accordance with the Club Constitution, hereby appoint ${person.name}${person.memberNumber ? ` (Member No. ${person.memberNumber})` : ''} as ${roleLabel} of the Club.`,
         `In this capacity, you shall be responsible for ${duties}.`,
         `You shall be required to uphold the values, Constitution, and Code of Conduct of the Club at all times, and to discharge your duties with integrity, diligence, and transparency.`,
         `We wish you success in this new role and look forward to your contribution to the continued growth and strengthening of our Club.`
       ];
     }
+    
     if (type === 'recommendation') {
       const first = person.name.split(' ')[0];
-      const lines = [];
-      if (person.isLeader) {
-        lines.push(`We, the shareholders and members of CRESTED SS INVESTMENT CLUB LTD, are pleased to recommend ${person.name}${person.memberNumber ? ` (Member No. ${person.memberNumber})` : ''}.`);
-        lines.push(`${person.name} serves as ${(person.role || '').replace(/_/g, ' ')} of our Club and has consistently demonstrated commitment, integrity, and responsible conduct in all dealings with the Club and fellow members.`);
-      } else {
-        lines.push(`We, the shareholders and members of CRESTED SS INVESTMENT CLUB LTD, are pleased to recommend ${person.name} (Member No. ${person.memberNumber}).`);
-        lines.push(`The above-named has been a member of our Club since ${fmtDate(person.membershipSince)}. During this period, they have demonstrated commitment, integrity, and responsible conduct in their dealings with the Club and fellow members.`);
-      }
+      const lines = [
+        `We, the shareholders and members of CRESTED SS INVESTMENT CLUB LTD, are pleased to recommend ${person.name}${person.memberNumber ? ` (Member No. ${person.memberNumber})` : ''}.`
+      ];
+      
+      const sinceText = person.membershipSince ? ` since ${fmtDate(person.membershipSince)}` : '';
+      
+      let statusLine = `${person.name} is our esteemed ${designation}${sinceText}.`;
+      if (isLeader) statusLine += ` ${first} currently serves as the ${(person.role || '').replace(/_/g, ' ')} of our Club.`;
+      if (hasShares) statusLine += ` ${first} holds ${person.totalShares} shares in the Club.`;
+      statusLine += ` Throughout this period, ${first} has consistently demonstrated commitment, integrity, and responsible conduct in all dealings with the Club and fellow members.`;
+      
+      lines.push(statusLine);
       if (reason && reason.trim()) lines.push(reason.trim());
-      lines.push(`We have no hesitation in recommending ${first} for any purpose they may deem fit. Please feel free to contact the Club for any further information.`);
+      lines.push(`We have no hesitation in recommending ${first} for any purpose deemed fit. Please feel free to contact the Club for any further information.`);
       return lines;
     }
+    
     if (type === 'good_standing') {
-      const isLeader = !!person.isLeader;
-      const hasShares = Number(person.totalShares) > 0;
-      const isMember = !!person.memberNumber;
       const memberNoStr = person.memberNumber ? ` (Member No. ${person.memberNumber})` : '';
-      if (isLeader && !isMember) {
-        return [
-          `This is to certify that ${person.name} is a registered leader of CRESTED SS INVESTMENT CLUB LTD, currently serving as ${(person.role || '').replace(/_/g, ' ')}, in good standing.`,
-          `As at the date of this letter, the above-named is current on all obligations of their office.`,
-          `This certificate is issued upon request and remains valid as at the date of issue.`
-        ];
+      const lines = [
+        `This is to certify that ${person.name}${memberNoStr} is a registered ${designation} of CRESTED SS INVESTMENT CLUB LTD in good standing.`
+      ];
+      
+      const sinceText = person.membershipSince ? ` ${person.name.split(' ')[0]} has been a member since ${fmtDate(person.membershipSince)}.` : '';
+      
+      let statusSentence = `As at the date of this letter, the above-named is current on all membership obligations.`;
+      
+      const extraInfo = [];
+      if (isLeader) extraInfo.push(`currently serves as the ${(person.role || '').replace(/_/g, ' ')}`);
+      if (hasShares) extraInfo.push(`holds ${person.totalShares} shares`);
+      if (person.savings) extraInfo.push(`has savings of UGX ${fmt(person.savings)}`);
+      
+      if (extraInfo.length > 0) {
+        statusSentence = `As at the date of this letter, the above-named is current on all membership obligations, ${extraInfo.join(', ')}, and remains in good standing.`;
       }
-      const parts = [];
-      if (isLeader) parts.push('leader');
-      if (hasShares) parts.push('shareholder');
-      parts.push('member');
-      const designation = parts.length === 3 ? 'leader, shareholder, and member' : parts.join(' and ');
-      const lines = [`This is to certify that ${person.name}${memberNoStr} is a registered ${designation} of CRESTED SS INVESTMENT CLUB LTD in good standing.`];
-      if (hasShares) lines.push(`As at the date of this letter, the above-named is current on all membership obligations, holds ${person.totalShares} shares in the Club, and has savings of UGX ${fmt(person.savings)}.`);
-      else lines.push(`As at the date of this letter, the above-named is current on all membership obligations.`);
+      
+      lines.push(statusSentence + sinceText);
+      
       if (!person.hasActiveLoan) lines.push('The above-named has no outstanding loans with the Club.');
       lines.push('This certificate is issued upon request and remains valid as at the date of issue.');
       return lines;
@@ -242,6 +269,20 @@ export default function LettersPage() {
     setLetterForm(newForm);
   };
 
+  useEffect(() => {
+    if (selectedPerson && (letterForm.type === 'recommendation' || letterForm.type === 'good_standing')) {
+      const newBody = templateBody(letterForm.type, selectedPerson, letterForm.reason);
+      setLetterForm(prev => ({ ...prev, body: newBody }));
+    }
+  }, [letterForm.ovOrg, letterForm.ovAddress, letterForm.ovSalutation]);
+
+  useEffect(() => {
+    if (letterForm.type === 'appointment' && selectedPerson && letterForm.termStart && letterForm.termEnd) {
+      const newBody = templateBody('appointment', selectedPerson, letterForm.reason);
+      setLetterForm(prev => ({ ...prev, body: newBody }));
+    }
+  }, [letterForm.termStart, letterForm.termEnd]);
+
   const updateBody = (idx, val) => {
     const body = [...letterForm.body];
     body[idx] = val;
@@ -272,7 +313,7 @@ export default function LettersPage() {
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || 'Failed');
       setMsg(`✅ Letter ${d.referenceNumber} created`);
-      setPdfModal({ title: `Letter ${d.referenceNumber}`, url: `${API}/api/letters/${d._id}/pdf` });
+      setPdfModal({ title: `Letter ${d.referenceNumber}`, baseUrl: `${API}/api/letters/${d._id}/pdf` });
       setLetterForm({ ...emptyLetterForm, type: letterForm.type });
       setShowAdvanced(false);
     } catch (err) { setMsg('❌ ' + err.message); }
@@ -293,16 +334,12 @@ export default function LettersPage() {
     const updates = { memberId };
     if (m) {
       if (role === 'success') {
-        updates.candidateName = m.name;
-        if (m.photo) updates.candidatePhoto = m.photo;
+        if (cardForm.relationship === 'self') updates.candidateName = m.name;
+        if (m.photo && cardForm.relationship === 'self') updates.candidatePhoto = m.photo;
       } else if (role === 'condolence') {
         if (cardForm.condolenceCase === 'club_lost_member') {
           updates.deceasedName = m.name;
           if (m.photo) updates.deceasedPhoto = m.photo;
-        }
-      } else if (role === 'wedding' || role === 'introduction') {
-        if (!cardForm.groomName && !cardForm.brideName) {
-          // Can't guess which — leave blank
         }
       }
     }
@@ -316,6 +353,7 @@ export default function LettersPage() {
     if (f.type === 'invitation' && !f.eventTitle.trim()) return setMsg('❌ Event title required');
     if (f.type === 'invitation' && (!f.eventDate || !f.eventVenue)) return setMsg('❌ Date and venue required');
     if (f.type === 'success' && !f.candidateName.trim()) return setMsg('❌ Candidate name required');
+    if (f.type === 'success' && !f.memberId) return setMsg('❌ Select the member this card is for');
     if (f.type === 'wedding' && (!f.brideName.trim() || !f.groomName.trim())) return setMsg('❌ Bride and groom names required');
     if (f.type === 'wedding' && (!f.weddingDate || !f.weddingVenue)) return setMsg('❌ Date and venue required');
     if (f.type === 'introduction' && (!f.brideName.trim() || !f.groomName.trim())) return setMsg('❌ Couple names required');
@@ -326,28 +364,42 @@ export default function LettersPage() {
     try {
       let subject = '';
       switch (f.type) {
-        case 'invitation': subject = (f.eventTitle || 'CLUB INVITATION').toUpperCase(); break;
-        case 'success': subject = `CONGRATULATIONS ${f.candidateName.toUpperCase()}`; break;
-        case 'wedding': subject = `${f.groomName.toUpperCase()} & ${f.brideName.toUpperCase()} WEDDING`; break;
-        case 'introduction': subject = `INTRODUCTION CEREMONY`; break;
-        case 'condolence': subject = `CONDOLENCE — ${f.deceasedName.toUpperCase()}`; break;
+        case 'invitation': 
+          subject = (f.eventTitle || 'CLUB INVITATION').toUpperCase(); 
+          break;
+        case 'success': {
+          const memName = options.members.find(m => m._id === f.memberId)?.name || 'MEMBER';
+          const relLabel = f.relationship === 'self' ? '' : `'S ${f.relationship.toUpperCase()}`;
+          subject = `BEST WISHES ${memName.toUpperCase()}${relLabel} — ${f.candidateName.toUpperCase()}`; 
+          break;
+        }
+        case 'wedding': 
+          subject = `${f.groomName.toUpperCase()} & ${f.brideName.toUpperCase()} WEDDING`; 
+          break;
+        case 'introduction': 
+          subject = `INTRODUCTION CEREMONY`; 
+          break;
+        case 'condolence': 
+          subject = `CONDOLENCE — ${f.deceasedName.toUpperCase()}`; 
+          break;
       }
 
       const cardDetails = {
         eventTitle: f.eventTitle, eventDate: f.eventDate, eventTime: f.eventTime, eventVenue: f.eventVenue,
         dressCode: f.dressCode, agenda: f.agenda, rsvpContact: f.rsvpContact,
-        candidateName: f.candidateName, candidatePhoto: f.candidatePhoto,
-        examName: f.examName, schoolName: f.schoolName, resultDetails: f.resultDetails,
+        candidateName: f.candidateName, candidatePhoto: f.candidatePhoto, relationship: f.relationship, examLevel: f.examLevel,
+        message: f.message,
         brideName: f.brideName, groomName: f.groomName, couplePhoto: f.couplePhoto,
         weddingDate: f.weddingDate, weddingTime: f.weddingTime,
         weddingVenue: f.weddingVenue, receptionVenue: f.receptionVenue,
-        introductionDate: f.introductionDate, introductionVenue: f.introductionVenue, families: f.families,
+        weddingRelationship: f.weddingRelationship, contributionAmount: f.contributionAmount,
+        introductionDate: f.introductionDate, introductionTime: f.introductionTime, introductionVenue: f.introductionVenue, 
+        families: f.families, groomFamily: f.groomFamily, brideFamily: f.brideFamily,
         condolenceCase: f.condolenceCase,
-        deceasedName: f.deceasedName, relationship: f.relationship, lifeDates: f.lifeDates,
+        deceasedName: f.deceasedName, lifeDates: f.lifeDates,
         deceasedPhoto: f.deceasedPhoto,
         funeralDate: f.funeralDate, funeralVenue: f.funeralVenue,
-        contributionAmount: f.contributionAmount ? Number(f.contributionAmount) : null,
-        message: f.message
+        relativeRelationship: f.relativeRelationship
       };
 
       const payload = {
@@ -360,7 +412,7 @@ export default function LettersPage() {
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || 'Failed');
       setMsg(`✅ Card ${d.referenceNumber} created`);
-      setPdfModal({ title: `Card ${d.referenceNumber}`, url: `${API}/api/letters/${d._id}/pdf` });
+      setPdfModal({ title: `Card ${d.referenceNumber}`, baseUrl: `${API}/api/letters/${d._id}/pdf` });
       setCardForm({ ...emptyCardForm, type: f.type });
     } catch (err) { setMsg('❌ ' + err.message); }
     finally { setSaving(false); }
@@ -375,6 +427,7 @@ export default function LettersPage() {
   };
 
   const currentTypes = mode === 'letters' ? LETTER_TYPES : CARD_TYPES;
+  const currentMember = options.members.find(m => m._id === cardForm.memberId);
 
   return (
     <div style={{ padding: '24px', maxWidth: '1100px', margin: '0 auto', fontFamily: 'Segoe UI, sans-serif' }}>
@@ -423,6 +476,36 @@ export default function LettersPage() {
                   ...(selectedPerson.isLeader ? [{ label: 'Role', value: (selectedPerson.role || '').replace(/_/g, ' ') }] : [])
                 ]} />
               )}
+            </Section>
+          )}
+
+          {letterForm.type === 'appointment' && selectedPerson && (
+            <Section title="3. Set Term Limits (Contract Duration)">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <Field label="Term Starts (From) *">
+                  <input type="date" value={letterForm.termStart} onChange={e => setLetterForm({ ...letterForm, termStart: e.target.value })} style={input} />
+                </Field>
+                <Field label="Term Expires (To) *">
+                  <input type="date" value={letterForm.termEnd} onChange={e => setLetterForm({ ...letterForm, termEnd: e.target.value })} style={input} />
+                </Field>
+              </div>
+            </Section>
+          )}
+
+          {letterForm.type === 'recommendation' && selectedPerson && (
+            <Section title="3. Addressee (Where is this recommendation going?)">
+              <Field label="Specific Title (e.g. The Manager, The Ambassador)">
+                <input type="text" value={letterForm.ovTitle} onChange={e => setLetterForm({ ...letterForm, ovTitle: e.target.value })} style={input} placeholder="Leave blank for 'To Whom It May Concern'" />
+              </Field>
+              <Field label="Organization / Institution (optional)">
+                <input type="text" value={letterForm.ovOrg} onChange={e => setLetterForm({ ...letterForm, ovOrg: e.target.value })} style={input} placeholder="e.g. LUBASA INVESTMENTS LIMITED" />
+              </Field>
+              <Field label="Specific Address / Location (optional)">
+                <input type="text" value={letterForm.ovAddress} onChange={e => setLetterForm({ ...letterForm, ovAddress: e.target.value })} style={input} placeholder="e.g. P.O. BOX 153877 KAMPALA" />
+              </Field>
+              <Field label="Salutation (optional - auto-filled)">
+                <input type="text" value={letterForm.ovSalutation} onChange={e => setLetterForm({ ...letterForm, ovSalutation: e.target.value })} style={input} placeholder="e.g. Dear Sir/Madam," />
+              </Field>
             </Section>
           )}
 
@@ -486,34 +569,81 @@ export default function LettersPage() {
           {/* SUCCESS */}
           {cardForm.type === 'success' && (
             <Section title="Success Card Details">
-              <Field label="Link to Member (optional)">
-                <select value={cardForm.memberId} onChange={e => handleCardMemberSelect(e.target.value, 'success')} style={input}>
-                  <option value="">— Not linked (e.g. child of member) —</option>
-                  {options.members.map(m => <option key={m._id} value={m._id}>{m.name} — {m.memberNumber}</option>)}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <Field label="Select Member *">
+                  <select value={cardForm.memberId} onChange={e => handleCardMemberSelect(e.target.value, 'success')} style={input}>
+                    <option value="">— Select Member —</option>
+                    {options.members.map(m => <option key={m._id} value={m._id}>{m.name} — {m.memberNumber}</option>)}
+                  </select>
+                </Field>
+                <Field label="Who is sitting for the exam? *">
+                  <select value={cardForm.relationship} onChange={e => setCardForm({ ...cardForm, relationship: e.target.value, candidateName: e.target.value === 'self' && currentMember ? currentMember.name : '' })} style={input}>
+                    <option value="self">The Member (Self)</option>
+                    <option value="son">Member's Son</option>
+                    <option value="daughter">Member's Daughter</option>
+                    <option value="spouse">Member's Spouse</option>
+                  </select>
+                </Field>
+              </div>
+
+              <Field label="Level of Examination *">
+                <select value={cardForm.examLevel || 'UCE'} onChange={e => setCardForm({ ...cardForm, examLevel: e.target.value })} style={input}>
+                  <option value="PLE">Primary Leaving Examination (PLE)</option>
+                  <option value="UCE">Uganda Certificate of Education (UCE)</option>
+                  <option value="UACE">Uganda Advanced Certificate of Education (UACE)</option>
+                  <option value="University">University / Tertiary Institution</option>
                 </select>
               </Field>
-              <Field label="Candidate Name *"><input type="text" value={cardForm.candidateName} onChange={e => setCardForm({ ...cardForm, candidateName: e.target.value })} style={input} /></Field>
-              <Field label="Candidate Photo (optional — 2MB max)">
+              
+              {cardForm.relationship !== 'self' && currentMember && (
+                <div style={{ padding: '10px', background: '#f0fdf4', borderRadius: '6px', fontSize: '13px', color: '#15803d', marginBottom: '10px', fontWeight: '600' }}>
+                  This card will be addressed to: {currentMember.name.toUpperCase()}'S {cardForm.relationship.toUpperCase()}
+                </div>
+              )}
+
+              <Field label={cardForm.relationship === 'self' ? "Member Name" : `Name of the ${cardForm.relationship}`}>
+                <input type="text" value={cardForm.candidateName} onChange={e => setCardForm({ ...cardForm, candidateName: e.target.value })} style={input} disabled={cardForm.relationship === 'self'} />
+              </Field>
+
+              <Field label="Photo (optional — 2MB max)">
                 <input type="file" accept="image/*" onChange={e => handlePhotoUpload('candidatePhoto', e)} style={input} />
                 {cardForm.candidatePhoto && <img src={cardForm.candidatePhoto} alt="Preview" style={{ maxHeight: '80px', marginTop: '8px', borderRadius: '8px' }} />}
               </Field>
-              <Field label="Exam / Course"><input type="text" value={cardForm.examName} onChange={e => setCardForm({ ...cardForm, examName: e.target.value })} style={input} placeholder="e.g. UGANDA CERTIFICATE OF EDUCATION" /></Field>
-              <Field label="School / Institution"><input type="text" value={cardForm.schoolName} onChange={e => setCardForm({ ...cardForm, schoolName: e.target.value })} style={input} /></Field>
-              <Field label="Result Details (optional)"><input type="text" value={cardForm.resultDetails} onChange={e => setCardForm({ ...cardForm, resultDetails: e.target.value })} style={input} placeholder="e.g. First Grade, 8 in 8" /></Field>
-              <Field label="Club Contribution (UGX) — optional"><input type="number" value={cardForm.contributionAmount} onChange={e => setCardForm({ ...cardForm, contributionAmount: e.target.value })} style={input} placeholder="e.g. 200000" /></Field>
-              <Field label="Custom Message (optional — default used if blank)"><textarea value={cardForm.message} onChange={e => setCardForm({ ...cardForm, message: e.target.value })} style={{ ...input, minHeight: '80px', fontFamily: 'inherit' }} placeholder="Leave blank for auto-generated club message" /></Field>
+              
+              <Field label="Custom Message (optional — general text used if blank)">
+                <textarea value={cardForm.message} onChange={e => setCardForm({ ...cardForm, message: e.target.value })} style={{ ...input, minHeight: '80px', fontFamily: 'inherit' }} placeholder="Leave blank for the standard good luck message" />
+              </Field>
             </Section>
           )}
 
           {/* WEDDING */}
           {cardForm.type === 'wedding' && (
             <Section title="Wedding Card Details">
-              <Field label="Link to Member (optional)">
-                <select value={cardForm.memberId} onChange={e => handleCardMemberSelect(e.target.value, 'wedding')} style={input}>
-                  <option value="">— Optional: link the club member getting married —</option>
-                  {options.members.map(m => <option key={m._id} value={m._id}>{m.name} — {m.memberNumber}</option>)}
-                </select>
-              </Field>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <Field label="Select Member (Optional)">
+                  <select value={cardForm.memberId} onChange={e => handleCardMemberSelect(e.target.value, 'wedding')} style={input}>
+                    <option value="">— Not linked —</option>
+                    {options.members.map(m => <option key={m._id} value={m._id}>{m.name} — {m.memberNumber}</option>)}
+                  </select>
+                </Field>
+                <Field label="Whose Wedding is it? *">
+                  <select value={cardForm.weddingRelationship} onChange={e => setCardForm({ ...cardForm, weddingRelationship: e.target.value })} style={input}>
+                    <option value="self">The Member (Self)</option>
+                    <option value="son">Member's Son</option>
+                    <option value="daughter">Member's Daughter</option>
+                    <option value="parent">Member's Parent</option>
+                    <option value="relative">Other Relative</option>
+                    <option value="none">Not linked to a member</option>
+                  </select>
+                </Field>
+              </div>
+
+              {cardForm.weddingRelationship !== 'none' && currentMember && cardForm.weddingRelationship !== 'self' && (
+                <div style={{ padding: '10px', background: '#fdf2f8', borderRadius: '6px', fontSize: '13px', color: '#be185d', marginBottom: '10px', fontWeight: '600' }}>
+                  This wedding card will be for: {cardForm.weddingRelationship.toUpperCase()} OF {currentMember.name.toUpperCase()}
+                </div>
+              )}
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <Field label="Groom's Name *"><input type="text" value={cardForm.groomName} onChange={e => setCardForm({ ...cardForm, groomName: e.target.value })} style={input} /></Field>
                 <Field label="Bride's Name *"><input type="text" value={cardForm.brideName} onChange={e => setCardForm({ ...cardForm, brideName: e.target.value })} style={input} /></Field>
@@ -529,7 +659,11 @@ export default function LettersPage() {
               <Field label="Venue *"><input type="text" value={cardForm.weddingVenue} onChange={e => setCardForm({ ...cardForm, weddingVenue: e.target.value })} style={input} /></Field>
               <Field label="Reception Venue"><input type="text" value={cardForm.receptionVenue} onChange={e => setCardForm({ ...cardForm, receptionVenue: e.target.value })} style={input} /></Field>
               <Field label="Dress Code"><input type="text" value={cardForm.dressCode} onChange={e => setCardForm({ ...cardForm, dressCode: e.target.value })} style={input} /></Field>
-              <Field label="Club Contribution (UGX) — optional"><input type="number" value={cardForm.contributionAmount} onChange={e => setCardForm({ ...cardForm, contributionAmount: e.target.value })} style={input} placeholder="e.g. 500000" /></Field>
+              
+              <Field label="Club Pledge / Contribution (UGX) — optional">
+                <input type="number" value={cardForm.contributionAmount} onChange={e => setCardForm({ ...cardForm, contributionAmount: e.target.value })} style={input} placeholder="e.g. 500000" />
+              </Field>
+              
               <Field label="Custom Message (optional)"><textarea value={cardForm.message} onChange={e => setCardForm({ ...cardForm, message: e.target.value })} style={{ ...input, minHeight: '80px', fontFamily: 'inherit' }} /></Field>
             </Section>
           )}
@@ -537,12 +671,31 @@ export default function LettersPage() {
           {/* INTRODUCTION */}
           {cardForm.type === 'introduction' && (
             <Section title="Introduction Ceremony Details">
-              <Field label="Link to Member (optional)">
-                <select value={cardForm.memberId} onChange={e => handleCardMemberSelect(e.target.value, 'introduction')} style={input}>
-                  <option value="">— Optional: link the club member —</option>
-                  {options.members.map(m => <option key={m._id} value={m._id}>{m.name} — {m.memberNumber}</option>)}
-                </select>
-              </Field>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <Field label="Link to Member (Optional)">
+                  <select value={cardForm.memberId} onChange={e => handleCardMemberSelect(e.target.value, 'introduction')} style={input}>
+                    <option value="">— Not linked —</option>
+                    {options.members.map(m => <option key={m._id} value={m._id}>{m.name} — {m.memberNumber}</option>)}
+                  </select>
+                </Field>
+                <Field label="Whose Ceremony is it? *">
+                  <select value={cardForm.weddingRelationship} onChange={e => setCardForm({ ...cardForm, weddingRelationship: e.target.value })} style={input}>
+                    <option value="self">The Member (Self)</option>
+                    <option value="son">Member's Son</option>
+                    <option value="daughter">Member's Daughter</option>
+                    <option value="parent">Member's Parent</option>
+                    <option value="relative">Other Relative</option>
+                    <option value="none">Not linked to a member</option>
+                  </select>
+                </Field>
+              </div>
+
+              {cardForm.weddingRelationship !== 'none' && currentMember && cardForm.weddingRelationship !== 'self' && (
+                <div style={{ padding: '10px', background: '#fef9e7', borderRadius: '6px', fontSize: '13px', color: '#78350f', marginBottom: '10px', fontWeight: '600' }}>
+                  This card will be for: {cardForm.weddingRelationship.toUpperCase()} OF {currentMember.name.toUpperCase()}
+                </div>
+              )}
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <Field label="Groom's Name *"><input type="text" value={cardForm.groomName} onChange={e => setCardForm({ ...cardForm, groomName: e.target.value })} style={input} /></Field>
                 <Field label="Bride's Name *"><input type="text" value={cardForm.brideName} onChange={e => setCardForm({ ...cardForm, brideName: e.target.value })} style={input} /></Field>
@@ -551,13 +704,24 @@ export default function LettersPage() {
                 <input type="file" accept="image/*" onChange={e => handlePhotoUpload('couplePhoto', e)} style={input} />
                 {cardForm.couplePhoto && <img src={cardForm.couplePhoto} alt="Preview" style={{ maxHeight: '80px', marginTop: '8px', borderRadius: '8px' }} />}
               </Field>
-              <Field label="Families (e.g. 'The Ssemakula & Kaggwa families')"><input type="text" value={cardForm.families} onChange={e => setCardForm({ ...cardForm, families: e.target.value })} style={input} /></Field>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <Field label="Groom's Family (e.g. The Ssemakula Family)">
+                  <input type="text" value={cardForm.groomFamily} onChange={e => setCardForm({ ...cardForm, groomFamily: e.target.value })} style={input} placeholder="e.g. The Ssemakula Family" />
+                </Field>
+                <Field label="Bride's Family (e.g. The Kaggwa Family)">
+                  <input type="text" value={cardForm.brideFamily} onChange={e => setCardForm({ ...cardForm, brideFamily: e.target.value })} style={input} placeholder="e.g. The Kaggwa Family" />
+                </Field>
+              </div>
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <Field label="Date *"><input type="date" value={cardForm.introductionDate} onChange={e => setCardForm({ ...cardForm, introductionDate: e.target.value })} style={input} /></Field>
-                <Field label="Dress Code"><input type="text" value={cardForm.dressCode} onChange={e => setCardForm({ ...cardForm, dressCode: e.target.value })} style={input} placeholder="e.g. Traditional" /></Field>
+                <Field label="Time"><input type="time" value={cardForm.introductionTime} onChange={e => setCardForm({ ...cardForm, introductionTime: e.target.value })} style={input} /></Field>
               </div>
               <Field label="Venue *"><input type="text" value={cardForm.introductionVenue} onChange={e => setCardForm({ ...cardForm, introductionVenue: e.target.value })} style={input} /></Field>
-              <Field label="Club Contribution (UGX) — optional"><input type="number" value={cardForm.contributionAmount} onChange={e => setCardForm({ ...cardForm, contributionAmount: e.target.value })} style={input} /></Field>
+              <Field label="Club Pledge / Contribution (UGX) — optional">
+                <input type="number" value={cardForm.contributionAmount} onChange={e => setCardForm({ ...cardForm, contributionAmount: e.target.value })} style={input} placeholder="e.g. 500000" />
+              </Field>
               <Field label="Custom Message (optional)"><textarea value={cardForm.message} onChange={e => setCardForm({ ...cardForm, message: e.target.value })} style={{ ...input, minHeight: '80px', fontFamily: 'inherit' }} /></Field>
             </Section>
           )}
@@ -566,7 +730,7 @@ export default function LettersPage() {
           {cardForm.type === 'condolence' && (
             <Section title="Condolence Card Details">
               <Field label="Case">
-                <select value={cardForm.condolenceCase} onChange={e => setCardForm({ ...cardForm, condolenceCase: e.target.value, memberId: '', deceasedName: '', deceasedPhoto: '' })} style={input}>
+                <select value={cardForm.condolenceCase} onChange={e => setCardForm({ ...cardForm, condolenceCase: e.target.value, memberId: '', deceasedName: '', deceasedPhoto: '', relativeRelationship: 'father' })} style={input}>
                   <option value="club_lost_member">Club Lost a Member</option>
                   <option value="member_lost_loved_one">Member Lost a Loved One</option>
                 </select>
@@ -580,9 +744,23 @@ export default function LettersPage() {
                       {options.members.map(m => <option key={m._id} value={m._id}>{m.name} — {m.memberNumber}</option>)}
                     </select>
                   </Field>
-                  <Field label="Relationship (e.g. mother, father, son) *">
-                    <input type="text" value={cardForm.relationship} onChange={e => setCardForm({ ...cardForm, relationship: e.target.value })} style={input} placeholder="e.g. mother" />
+                  
+                  <Field label="Relationship to the Deceased *">
+                    <select value={cardForm.relativeRelationship || 'father'} onChange={e => setCardForm({ ...cardForm, relativeRelationship: e.target.value })} style={input}>
+                      <option value="father">Father</option>
+                      <option value="mother">Mother</option>
+                      <option value="daughter">Daughter</option>
+                      <option value="son">Son</option>
+                      <option value="sister">Sister</option>
+                      <option value="brother">Brother</option>
+                      <option value="cousin">Cousin</option>
+                      <option value="nephew">Nephew</option>
+                      <option value="niece">Niece</option>
+                      <option value="spouse">Spouse</option>
+                      <option value="other">Other Relative</option>
+                    </select>
                   </Field>
+
                   <Field label="Name of the Deceased *">
                     <input type="text" value={cardForm.deceasedName} onChange={e => setCardForm({ ...cardForm, deceasedName: e.target.value })} style={input} />
                   </Field>
@@ -605,7 +783,6 @@ export default function LettersPage() {
                 <Field label="Funeral Date"><input type="date" value={cardForm.funeralDate} onChange={e => setCardForm({ ...cardForm, funeralDate: e.target.value })} style={input} /></Field>
                 <Field label="Funeral Venue"><input type="text" value={cardForm.funeralVenue} onChange={e => setCardForm({ ...cardForm, funeralVenue: e.target.value })} style={input} /></Field>
               </div>
-              <Field label="Club Contribution (UGX) — optional"><input type="number" value={cardForm.contributionAmount} onChange={e => setCardForm({ ...cardForm, contributionAmount: e.target.value })} style={input} placeholder="e.g. 300000" /></Field>
               <Field label="Custom Message (optional — default used if blank)"><textarea value={cardForm.message} onChange={e => setCardForm({ ...cardForm, message: e.target.value })} style={{ ...input, minHeight: '100px', fontFamily: 'inherit' }} placeholder="Leave blank for auto-generated condolence message" /></Field>
             </Section>
           )}
@@ -655,7 +832,7 @@ export default function LettersPage() {
                         <td style={{ ...td, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayName}</td>
                         <td style={td}>
                           <div style={{ display: 'flex', gap: '4px' }}>
-                            <button onClick={() => setPdfModal({ title: l.subject, url: `${API}/api/letters/${l._id}/pdf` })} style={btnMini('#7c3aed')}>📄 PDF</button>
+                            <button onClick={() => setPdfModal({ title: l.subject, baseUrl: `${API}/api/letters/${l._id}/pdf` })} style={btnMini('#7c3aed')}>📄 PDF</button>
                             <button onClick={() => deleteItem(l._id, l.referenceNumber)} style={btnMini('#dc2626')}>🗑</button>
                           </div>
                         </td>
@@ -669,7 +846,7 @@ export default function LettersPage() {
         </div>
       )}
 
-      {pdfModal && <PdfOptionsModal title={pdfModal.title} baseUrl={pdfModal.url} onClose={() => setPdfModal(null)} />}
+      {pdfModal && <PdfOptionsModal title={pdfModal.title} baseUrl={pdfModal.baseUrl} onClose={() => setPdfModal(null)} />}
     </div>
   );
 }
